@@ -3,32 +3,25 @@ package input
 import (
 	"edigo/pkg/file"
 	"edigo/pkg/notify"
-	"edigo/pkg/render"
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 	"log"
 	"os"
 )
 
-var unsavedChanges bool = false
-
-func HandleKey(ev *tcell.EventKey, screen tcell.Screen, lines []string, cursorX *int, cursorY *int, style tcell.Style, tildeColor tcell.Color) []string {
-	_, screenHeight := screen.Size()
-
-	// handle keychange bindings
-	// @Tim dont ask me whats happening here...
+func HandleKey(ev *tcell.EventKey, screen *tview.TextView, lines []string, cursorX *int, cursorY *int, unsavedChanges bool) ([]string, bool) {
 	switch ev.Key() {
 	case tcell.KeyEscape, tcell.KeyCtrlC:
-		screen.Fini()
 		os.Exit(0)
 	case tcell.KeyCtrlS:
-		// file save, this should be done in a seperate module in the future
-		err := file.Save("example.txt", lines)
-		if err != nil {
-			screen.Fini()
-			log.Fatalf("Error saving file: %v", err)
+		if unsavedChanges {
+			err := file.Save("example.txt", lines)
+			if err != nil {
+				log.Fatalf("Error saving file: %v", err)
+			}
+			unsavedChanges = false
+			notify.ClearMessage(screen)
 		}
-		unsavedChanges = false
-		notify.ClearMessage(screen)
 	case tcell.KeyUp:
 		if *cursorY > 0 {
 			*cursorY--
@@ -65,6 +58,7 @@ func HandleKey(ev *tcell.EventKey, screen tcell.Screen, lines []string, cursorX 
 			line := lines[*cursorY]
 			lines[*cursorY] = line[:*cursorX-1] + line[*cursorX:]
 			*cursorX--
+			unsavedChanges = true
 		} else if *cursorY > 0 {
 			previousLine := lines[*cursorY-1]
 			currentLine := lines[*cursorY]
@@ -72,14 +66,17 @@ func HandleKey(ev *tcell.EventKey, screen tcell.Screen, lines []string, cursorX 
 			*cursorY--
 			*cursorX = len(previousLine)
 			lines[*cursorY] = previousLine + currentLine
+			unsavedChanges = true
 		}
 	case tcell.KeyDelete:
 		if *cursorX < len(lines[*cursorY]) {
 			line := lines[*cursorY]
 			lines[*cursorY] = line[:*cursorX] + line[*cursorX+1:]
+			unsavedChanges = true
 		} else if *cursorY < len(lines)-1 {
 			lines[*cursorY] += lines[*cursorY+1]
 			lines = append(lines[:*cursorY+1], lines[*cursorY+2:]...)
+			unsavedChanges = true
 		}
 	case tcell.KeyRune:
 		if *cursorY >= len(lines) {
@@ -88,9 +85,8 @@ func HandleKey(ev *tcell.EventKey, screen tcell.Screen, lines []string, cursorX 
 		if *cursorX <= len(lines[*cursorY]) {
 			lines[*cursorY] = lines[*cursorY][:*cursorX] + string(ev.Rune()) + lines[*cursorY][*cursorX:]
 			*cursorX++
+			unsavedChanges = true
 		}
-		unsavedChanges = true
-		notify.ShowMessage(screen, "Press Ctrl+S to save", style)
 	}
 
 	if *cursorY >= len(lines) {
@@ -100,21 +96,5 @@ func HandleKey(ev *tcell.EventKey, screen tcell.Screen, lines []string, cursorX 
 		*cursorX = len(lines[*cursorY])
 	}
 
-	screen.Clear()
-	screen.Sync()
-
-	render.Content(screen, lines, tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorDefault), tildeColor)
-
-	// @ SaveMessage
-	if unsavedChanges {
-		message := "Press Ctrl+S to save"
-		for i, r := range message {
-			screen.SetContent(i, screenHeight-1, r, nil, tcell.StyleDefault.Foreground(tcell.ColorYellow).Background(tcell.ColorDefault))
-		}
-	}
-
-	screen.ShowCursor(*cursorX, *cursorY)
-	screen.Sync()
-
-	return lines
+	return lines, unsavedChanges
 }
