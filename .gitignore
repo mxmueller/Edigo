@@ -9,7 +9,7 @@
 *.out
 
 # Dependency directories (remove the comment below if you're using vendoring)
-# /vendor/
+/vendor/
 
 
 # IDE and editor specific files
