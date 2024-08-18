@@ -3,10 +3,13 @@ package ui
 import (
 	"edigo/pkg/editor"
 	"fmt"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"os"
+	"time"
 )
 
 type UIModel struct {
@@ -19,8 +22,9 @@ type UIModel struct {
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
-	editorInstance := editor.NewEditor(content)
-	vp := viewport.New(80, 24) // Default size; changes on window resize
+	siteID := generateSiteID()
+	editorInstance := editor.NewEditor(content, siteID)
+	vp := viewport.New(80, 24)
 
 	return &UIModel{
 		Editor:       editorInstance,
@@ -53,7 +57,7 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveFile()
 			return m, nil
 		}
-		m.InputHandler.HandleKeyMsg(msg) // Handle key input for navigation
+		m.InputHandler.HandleKeyMsg(msg)
 		m.Viewport.SetContent(m.renderContent())
 
 	case tea.WindowSizeMsg:
@@ -70,7 +74,39 @@ func (m *UIModel) View() string {
 }
 
 func (m *UIModel) renderContent() string {
-	return fmt.Sprintf("File: %s\n\n%s", m.FilePath, m.Editor.RenderDocument())
+	// Zeilennummern und Dokumentinhalt separat rendern
+	lineNumbers := m.Editor.GetLineNumbers()
+	document := m.Editor.RenderDocument()
+
+	// Spaltenbreite für Zeilennummern festlegen
+	lineNumberWidth := len(fmt.Sprintf("%d", strings.Count(document, "\n")+1)) + 2
+
+	// Baue die Ausgabe mit zwei Spalten: Zeilennummern und Dokumentinhalt
+	var output strings.Builder
+
+	lines := strings.Split(document, "\n")
+	numberLines := strings.Split(lineNumbers, "\n")
+
+	// Bestimme die Höhe des Viewports für die Darstellung der Tilden
+	totalLines := m.Viewport.Height - 2 // Abzug für Dateiname und Leerzeile
+
+	for i := 0; i < totalLines; i++ {
+		if i < len(lines) {
+			// Zeige die Zeilennummer und den entsprechenden Text an
+			if i < len(numberLines) {
+				output.WriteString(fmt.Sprintf("%-*s", lineNumberWidth, numberLines[i]))
+			} else {
+				output.WriteString(fmt.Sprintf("%-*s", lineNumberWidth, ""))
+			}
+			output.WriteString(lines[i])
+		} else {
+			// Zeige eine Tilde in der Zeilennummernspalte an
+			output.WriteString(fmt.Sprintf("%-*s", lineNumberWidth, "~"))
+		}
+		output.WriteString("\n")
+	}
+
+	return fmt.Sprintf("File: %s\n\n%s", m.FilePath, output.String())
 }
 
 func (m *UIModel) saveFile() {
@@ -79,4 +115,8 @@ func (m *UIModel) saveFile() {
 	if err != nil {
 		fmt.Printf("Error saving file: %v\n", err)
 	}
+}
+
+func generateSiteID() string {
+	return fmt.Sprintf("site-%d", time.Now().UnixNano())
 }

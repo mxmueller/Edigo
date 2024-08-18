@@ -1,76 +1,172 @@
 package crdt
 
 import (
+	"fmt"
+	"math/rand" // Import für die Zufallszahlengenerierung
 	"strings"
+	"time"
 )
 
-// CRDTCharacter represents a character in the CRDT model
-type CRDTCharacter struct {
-	ID      string
-	Value   string
-	Visible bool
-	PrevID  string
-	NextID  string
+type OperationType int
+
+const (
+	Insert OperationType = iota
+	Delete
+)
+
+type Element struct {
+	ID        string
+	Character rune
+	Tombstone bool
 }
 
-// CRDT represents the entire text document using a CRDT model
-type CRDT struct {
-	Chars map[string]*CRDTCharacter
-	Head  string
+type Operation struct {
+	Type      OperationType
+	ID        string
+	Character rune
+	Position  int
 }
 
-// NewCRDT initializes a new CRDT instance
-func NewCRDT() *CRDT {
-	return &CRDT{
-		Chars: make(map[string]*CRDTCharacter),
-		Head:  "",
+type RGA struct {
+	Elements       []Element
+	Site           string
+	Clock          int
+	CursorPosition int
+}
+
+func NewRGA(site string) *RGA {
+	return &RGA{
+		Elements:       []Element{},
+		Site:           site,
+		Clock:          0,
+		CursorPosition: 0,
 	}
 }
 
-// Insert inserts a new character into the CRDT
-func (c *CRDT) Insert(id, value, prevID, nextID string) {
-	char := &CRDTCharacter{
-		ID:      id,
-		Value:   value,
-		Visible: true,
-		PrevID:  prevID,
-		NextID:  nextID,
-	}
-	c.Chars[id] = char
+func (rga *RGA) generateID() string {
+	rga.Clock++
+	return fmt.Sprintf("%s-%d-%d", rga.Site, rga.Clock, rand.Intn(1000))
+}
 
-	if prevID == "" {
-		// Insert at the beginning
-		char.NextID = c.Head
-		c.Head = id
+func (rga *RGA) LocalInsert(char rune) Operation {
+	id := rga.generateID()
+	newElement := Element{ID: id, Character: char, Tombstone: false}
+
+	if rga.CursorPosition >= len(rga.Elements) {
+		rga.Elements = append(rga.Elements, newElement)
 	} else {
-		// Insert in the middle or end
-		prevChar := c.Chars[prevID]
-		nextChar := c.Chars[prevChar.NextID]
+		rga.Elements = append(rga.Elements[:rga.CursorPosition+1], rga.Elements[rga.CursorPosition:]...)
+		rga.Elements[rga.CursorPosition] = newElement
+	}
 
-		prevChar.NextID = id
-		if nextChar != nil {
-			char.NextID = nextChar.ID
+	op := Operation{Type: Insert, ID: id, Character: char, Position: rga.CursorPosition}
+	rga.CursorPosition++
+
+	return op
+}
+
+func (rga *RGA) LocalDelete() Operation {
+	if rga.CursorPosition > 0 {
+		rga.CursorPosition--
+		rga.Elements[rga.CursorPosition].Tombstone = true
+		op := Operation{Type: Delete, ID: rga.Elements[rga.CursorPosition].ID, Position: rga.CursorPosition}
+
+		return op
+	}
+	return Operation{}
+}
+
+func (rga *RGA) RemoteInsert(op Operation) {
+	newElement := Element{ID: op.ID, Character: op.Character, Tombstone: false}
+
+	if op.Position >= len(rga.Elements) {
+		rga.Elements = append(rga.Elements, newElement)
+	} else {
+		rga.Elements = append(rga.Elements[:op.Position+1], rga.Elements[op.Position:]...)
+		rga.Elements[op.Position] = newElement
+	}
+}
+
+func (rga *RGA) RemoteDelete(op Operation) {
+	for i, elem := range rga.Elements {
+		if elem.ID == op.ID {
+			rga.Elements[i].Tombstone = true
+			break
 		}
 	}
 }
 
-// Delete marks a character as invisible
-func (c *CRDT) Delete(id string) {
-	if char, exists := c.Chars[id]; exists {
-		char.Visible = false
+func (rga *RGA) ApplyOperation(op Operation) {
+	switch op.Type {
+	case Insert:
+		rga.RemoteInsert(op)
+	case Delete:
+		rga.RemoteDelete(op)
 	}
 }
 
-// String returns the current state of the CRDT as a string
-func (c *CRDT) String() string {
-	var builder strings.Builder
-	currentID := c.Head
-	for currentID != "" {
-		char := c.Chars[currentID]
-		if char.Visible {
-			builder.WriteString(char.Value)
+func (rga *RGA) GetText() string {
+	var result strings.Builder
+	for _, elem := range rga.Elements {
+		if !elem.Tombstone {
+			result.WriteRune(elem.Character)
 		}
-		currentID = char.NextID
 	}
-	return builder.String()
+	return result.String()
+}
+
+func (rga *RGA) MoveCursorLeft() {
+	if rga.CursorPosition > 0 {
+		rga.CursorPosition--
+	}
+}
+
+func (rga *RGA) MoveCursorRight() {
+	if rga.CursorPosition < len(rga.Elements) {
+		rga.CursorPosition++
+	}
+}
+
+func (rga *RGA) MoveCursorUp() {
+	if rga.CursorPosition == 0 {
+		return
+	}
+
+	// Bewege den Cursor zum vorherigen Zeilenumbruch
+	for rga.CursorPosition > 0 {
+		rga.CursorPosition--
+		if rga.Elements[rga.CursorPosition].Character == '\n' {
+			break
+		}
+	}
+
+	// Nun bis zum vorherigen Zeilenumbruch, um die Cursorposition in die vorherige Zeile zu setzen
+	for rga.CursorPosition > 0 {
+		rga.CursorPosition--
+		if rga.Elements[rga.CursorPosition].Character == '\n' {
+			rga.CursorPosition++
+			break
+		}
+	}
+}
+
+func (rga *RGA) MoveCursorDown() {
+	// Bewege den Cursor zum nächsten Zeilenumbruch
+	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
+		rga.CursorPosition++
+	}
+
+	// Wenn der Cursor am Ende ist, muss er nicht weiter bewegt werden
+	if rga.CursorPosition < len(rga.Elements) {
+		rga.CursorPosition++ // Gehe nach dem Zeilenumbruch zur nächsten Zeile
+	}
+
+	// Bewege den Cursor innerhalb der nächsten Zeile
+	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
+		rga.CursorPosition++
+	}
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }

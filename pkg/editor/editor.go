@@ -1,90 +1,83 @@
 package editor
 
 import (
+	"edigo/pkg/crdt"
+	"fmt"
 	"strings"
 )
 
 type Editor struct {
-	Content []string
-	CursorX int
-	CursorY int
+	RGA *crdt.RGA
 }
 
-// NewEditor initializes a new text editor with the given content.
-func NewEditor(content string) *Editor {
-	lines := strings.Split(content, "\n")
+func NewEditor(content string, siteID string) *Editor {
+	rga := crdt.NewRGA(siteID)
+	for _, char := range content {
+		rga.LocalInsert(char)
+	}
 	return &Editor{
-		Content: lines,
-		CursorX: 0,
-		CursorY: 0,
+		RGA: rga,
 	}
 }
 
-// InsertCharacter inserts a character at the current cursor position.
-func (e *Editor) InsertCharacter(ch string) {
-	line := e.Content[e.CursorY]
-	e.Content[e.CursorY] = line[:e.CursorX] + ch + line[e.CursorX:]
-	e.CursorX++
+func (e *Editor) InsertCharacter(ch rune) {
+	e.RGA.LocalInsert(ch)
 }
 
-// DeleteCharacterBeforeCursor deletes the character before the cursor.
 func (e *Editor) DeleteCharacterBeforeCursor() {
-	if e.CursorX > 0 {
-		line := e.Content[e.CursorY]
-		e.Content[e.CursorY] = line[:e.CursorX-1] + line[e.CursorX:]
-		e.CursorX--
-	}
+	e.RGA.LocalDelete()
 }
 
-// DeleteCharacterAtCursor deletes the character under the cursor.
-func (e *Editor) DeleteCharacterAtCursor() {
-	line := e.Content[e.CursorY]
-	if e.CursorX < len(line) {
-		e.Content[e.CursorY] = line[:e.CursorX] + line[e.CursorX+1:]
-	}
+func (e *Editor) MoveCursorLeft() {
+	e.RGA.MoveCursorLeft()
 }
 
-// JoinWithPreviousLine joins the current line with the previous one.
-func (e *Editor) JoinWithPreviousLine() {
-	if e.CursorY > 0 {
-		e.Content[e.CursorY-1] += e.Content[e.CursorY]
-		e.Content = append(e.Content[:e.CursorY], e.Content[e.CursorY+1:]...)
-		e.CursorY--
-		e.CursorX = len(e.Content[e.CursorY])
-	}
+func (e *Editor) MoveCursorRight() {
+	e.RGA.MoveCursorRight()
 }
 
-// getLine returns the content of a specific line by index.
-func (e *Editor) getLine(lineIndex int) string {
-	if lineIndex >= 0 && lineIndex < len(e.Content) {
-		return e.Content[lineIndex]
-	}
-	return ""
+// Neue Funktionen für das Bewegen nach oben und unten
+func (e *Editor) MoveCursorUp() {
+	e.RGA.MoveCursorUp()
 }
 
-// getLines returns all lines of the document as a slice of strings.
-func (e *Editor) getLines() []string {
-	return e.Content
+func (e *Editor) MoveCursorDown() {
+	e.RGA.MoveCursorDown()
 }
 
-// RenderDocument renders the document with line numbers and the cursor.
 func (e *Editor) RenderDocument() string {
 	var result strings.Builder
-	for i, line := range e.Content {
-		if i == e.CursorY {
-			if e.CursorX < len(line) {
-				result.WriteString(line[:e.CursorX] + "█" + line[e.CursorX:] + "\n")
-			} else {
-				result.WriteString(line + "█\n")
-			}
-		} else {
-			result.WriteString(line + "\n")
+	content := e.RGA.GetText()
+
+	for i, ch := range content {
+		if i == e.RGA.CursorPosition {
+			result.WriteRune('█') // Cursor
 		}
+		result.WriteRune(ch)
 	}
+
+	if e.RGA.CursorPosition == len(content) {
+		result.WriteRune('█') // Cursor am Ende
+	}
+
 	return result.String()
 }
 
-// RenderDocumentWithoutLineNumbers renders the document without line numbers.
+func (e *Editor) GetLineNumbers() string {
+	var lineNumbers strings.Builder
+	lineNumber := 1
+	lineNumbers.WriteString(fmt.Sprintf("%d\n", lineNumber))
+
+	for _, char := range e.RGA.GetText() {
+		if char == '\n' {
+			lineNumber++
+			lineNumbers.WriteString(fmt.Sprintf("%d\n", lineNumber))
+		}
+	}
+
+	return lineNumbers.String()
+}
+
 func (e *Editor) RenderDocumentWithoutLineNumbers() string {
-	return strings.Join(e.Content, "\n")
+	return e.RGA.GetText()
 }
