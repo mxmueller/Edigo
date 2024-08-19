@@ -1,53 +1,29 @@
 package main
 
 import (
-	"edigo/pkg/file"
-	"edigo/pkg/input"
-	"edigo/pkg/render"
-	"github.com/gdamore/tcell/v2"
-	"log"
+	"edigo/pkg/ui"
+	"fmt"
+	tea "github.com/charmbracelet/bubbletea"
+	"io/ioutil"
 	"os"
 )
 
 func main() {
-	screen, err := tcell.NewScreen()
+	if len(os.Args) < 2 {
+		fmt.Println("Please provide the file path as an argument.")
+		os.Exit(1)
+	}
+
+	filePath := os.Args[1]
+	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("Failed to start screen: %v", err)
-		os.Exit(1)
-	}
-	if err := screen.Init(); err != nil {
-		log.Fatalf("Failed to initialize screen: %v", err)
-		os.Exit(1)
-	}
-	defer screen.Fini()
-
-	// important for gray background bug
-	screen.Clear()
-	screen.Sync()
-
-	defStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorDefault)
-	tildeColor := tcell.ColorRed
-	cursorX, cursorY := 0, 0
-
-	lines, err := file.Load("example.txt")
-	if err != nil {
-		log.Fatalf("Error reading file: %v", err)
+		fmt.Printf("Error reading file: %v\n", err)
 		os.Exit(1)
 	}
 
-	render.Content(screen, lines, defStyle, tildeColor)
-	screen.ShowCursor(cursorX, cursorY)
-	screen.Sync()
-
-	for {
-		ev := screen.PollEvent()
-		switch ev := ev.(type) {
-		case *tcell.EventKey:
-			lines = input.HandleKey(ev, screen, lines, &cursorX, &cursorY, defStyle, tildeColor)
-		case *tcell.EventResize:
-			screen.Clear()
-			render.Content(screen, lines, defStyle, tildeColor)
-			screen.Sync()
-		}
+	model := ui.NewUIModel(string(content), filePath) // Pass file content and path to the model
+	p := tea.NewProgram(model)
+	if err := p.Start(); err != nil {
+		panic(err)
 	}
 }
