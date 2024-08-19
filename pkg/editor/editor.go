@@ -36,7 +36,6 @@ func (e *Editor) MoveCursorRight() {
 	e.RGA.MoveCursorRight()
 }
 
-// Neue Funktionen für das Bewegen nach oben und unten
 func (e *Editor) MoveCursorUp() {
 	e.RGA.MoveCursorUp()
 }
@@ -57,7 +56,7 @@ func (e *Editor) RenderDocument() string {
 	}
 
 	if e.RGA.CursorPosition == len(content) {
-		result.WriteRune('█') // Cursor am Ende
+		result.WriteRune('█') // Cursor End
 	}
 
 	return result.String()

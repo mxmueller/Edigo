@@ -132,7 +132,6 @@ func (rga *RGA) MoveCursorUp() {
 		return
 	}
 
-	// Bewege den Cursor zum vorherigen Zeilenumbruch
 	for rga.CursorPosition > 0 {
 		rga.CursorPosition--
 		if rga.Elements[rga.CursorPosition].Character == '\n' {
@@ -140,7 +139,6 @@ func (rga *RGA) MoveCursorUp() {
 		}
 	}
 
-	// Nun bis zum vorherigen Zeilenumbruch, um die Cursorposition in die vorherige Zeile zu setzen
 	for rga.CursorPosition > 0 {
 		rga.CursorPosition--
 		if rga.Elements[rga.CursorPosition].Character == '\n' {
@@ -150,18 +148,16 @@ func (rga *RGA) MoveCursorUp() {
 	}
 }
 
+// map cursor
 func (rga *RGA) MoveCursorDown() {
-	// Bewege den Cursor zum nächsten Zeilenumbruch
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
 		rga.CursorPosition++
 	}
 
-	// Wenn der Cursor am Ende ist, muss er nicht weiter bewegt werden
 	if rga.CursorPosition < len(rga.Elements) {
-		rga.CursorPosition++ // Gehe nach dem Zeilenumbruch zur nächsten Zeile
+		rga.CursorPosition++
 	}
 
-	// Bewege den Cursor innerhalb der nächsten Zeile
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
 		rga.CursorPosition++
 	}

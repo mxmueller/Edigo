@@ -22,15 +22,14 @@ func (ih *InputHandler) HandleKeyMsg(msg tea.KeyMsg) {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("right"))):
 		ih.Editor.MoveCursorRight()
 	case key.Matches(msg, key.NewBinding(key.WithKeys("up"))):
-		ih.Editor.MoveCursorUp() // Cursor nach oben bewegen
+		ih.Editor.MoveCursorUp()
 	case key.Matches(msg, key.NewBinding(key.WithKeys("down"))):
-		ih.Editor.MoveCursorDown() // Cursor nach unten bewegen
+		ih.Editor.MoveCursorDown()
 	case key.Matches(msg, key.NewBinding(key.WithKeys("backspace", "ctrl+h"))):
 		ih.Editor.DeleteCharacterBeforeCursor()
 	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 		ih.Editor.InsertCharacter('\n')
 	case key.Matches(msg, key.NewBinding(key.WithKeys("delete"))):
-		// Implement delete at cursor if needed
 	default:
 		if len(msg.String()) == 1 { // Only handle single characters
 			ih.Editor.InsertCharacter(rune(msg.String()[0]))
