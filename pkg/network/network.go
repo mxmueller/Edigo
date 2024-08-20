@@ -1,20 +1,34 @@
 package network
 
 import (
-    "bufio"
-    "fmt"
-    "net"
-    "os"
-    "strconv"
-    "strings"
-    "sync"
-    "time"
+	"bytes"
+	"edigo/pkg/crdt"
+	"edigo/pkg/editor"
+	"encoding/gob"
+	"fmt"
+	"math/rand"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 const (
-    broadcastAddr = "255.255.255.255:12345"
+    broadcastAddr = "10.10.42.255"
+    broadcastMin = 12340
+    broadcastMax = 12344
     tcpBasePort   = 12346
 )
+
+type Network struct{
+    IsHost bool
+    Host net.Conn // isHost = flase
+    Clients []net.Conn // isHost = true
+    Sessions     map[string]Session // found connections
+
+    UdpPort int
+}
 
 type Session struct {
     Name string
@@ -23,58 +37,50 @@ type Session struct {
 }
 
 var (
-    Sessions     = make(map[string]Session)
     sessionMutex sync.Mutex
+    Connections []net.Conn // active connections
+    Quit = make(chan bool)
 )
 
-func Test() {
-    go ListenForBroadcasts()
-    go BroadcastSession()
+func NewNetwork() Network{
+    
+    udpPort := 0
 
-    time.Sleep(5 * time.Second) // Warte kurz, um einige Sitzungen zu entdecken
-
-    for {
-        sessionMutex.Unlock()
-
-        fmt.Println("\nOptionen:")
-        fmt.Println("1. Sitzung beitreten")
-        fmt.Println("2. Aktualisieren")
-        fmt.Println("3. Beenden")
-
-        reader := bufio.NewReader(os.Stdin)
-        fmt.Print("Wählen Sie eine Option: ")
-        choice, _ := reader.ReadString('\n')
-        choice = strings.TrimSpace(choice)
-
-        switch choice {
-        case "1":
-            fmt.Print("Geben Sie den Namen der Sitzung ein, der Sie beitreten möchten: ")
-            sessionName, _ := reader.ReadString('\n')
-            sessionName = strings.TrimSpace(sessionName)
-            JoinSession(sessionName)
-        case "2":
+    for port := broadcastMin; port <= broadcastMax; port++ {
+        addr, err := net.ResolveUDPAddr("udp", broadcastAddr + ":" + strconv.Itoa(port))
+        if err != nil {
+            fmt.Println("Fehler beim Auflösen der Broadcast-Adresse:", err)
             continue
-        case "3":
-            return
-        default:
-            fmt.Println("Ungültige Option, bitte versuchen Sie es erneut.")
         }
+
+        conn, err := net.ListenUDP("udp", addr)
+        if err != nil {
+            fmt.Println("Fehler beim Öffnen der UDP-Verbindung:", err)
+            continue
+        }
+        udpPort = port
+        defer conn.Close()
+        break
     }
+    if udpPort == 0 {
+        fmt.Println("Kein freier Port mehr verfügbar. Stelle eine größere Portrange ein")
+    }
+
+    return Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort}
 }
 
-func ListenForBroadcasts() (map[string]Session) {
-    addr, err := net.ResolveUDPAddr("udp", broadcastAddr)
+func (network *Network) ListenForBroadcasts()  {
+    addr, err := net.ResolveUDPAddr("udp", broadcastAddr + ":" + strconv.Itoa(network.UdpPort))
     if err != nil {
         fmt.Println("Fehler beim Auflösen der Broadcast-Adresse:", err)
-        return nil
+        return 
     }
 
     conn, err := net.ListenUDP("udp", addr)
     if err != nil {
         fmt.Println("Fehler beim Öffnen der UDP-Verbindung:", err)
-        return nil
+        return 
     }
-    defer conn.Close()
 
     buffer := make([]byte, 1024)
     for {
@@ -83,67 +89,90 @@ func ListenForBroadcasts() (map[string]Session) {
             fmt.Println("Fehler beim Lesen der UDP-Nachricht:", err)
             continue
         }
+        isLocalAddr, err := isLocalAddress(remoteAddr.IP.String())
 
         message := string(buffer[:n])
         parts := strings.Split(message, "|")
-        if len(parts) == 3 && parts[0] == "SESSION" {
+        
+        udpPort, err := strconv.Atoi(parts[3])
+        
+        // fmt.Println(parts[3], strconv.Itoa(network.UdpPort))
+        if isLocalAddr && udpPort == network.UdpPort{
+            continue
+        }
+
+        if len(parts) == 4 && parts[0] == "SESSION" {
             sessionName := parts[1]
             port, _ := strconv.Atoi(parts[2])
             sessionMutex.Lock()
-            Sessions[sessionName] = Session{Name: sessionName, IP: remoteAddr.IP.String(), Port: port}
+            network.Sessions[sessionName] = Session{Name: sessionName, IP: remoteAddr.IP.String(), Port: port}
             sessionMutex.Unlock()
         }
     }
 }
 
-func BroadcastSession() {
-    addr, err := net.ResolveUDPAddr("udp", broadcastAddr)
-    if err != nil {
-        fmt.Println("Fehler beim Auflösen der Broadcast-Adresse:", err)
-        return
-    }
-
-    conn, err := net.DialUDP("udp", nil, addr)
-    if err != nil {
-        fmt.Println("Fehler beim Öffnen der UDP-Verbindung:", err)
-        return
-    }
-    defer conn.Close()
+func (network *Network) BroadcastSession(e *editor.Editor) {
 
     listener, err := net.Listen("tcp", ":0")
     if err != nil {
         fmt.Println("Fehler beim Starten des TCP-Listeners:", err)
         return
     }
-    defer listener.Close()
 
     port := listener.Addr().(*net.TCPAddr).Port
     sessionName := fmt.Sprintf("Session-%d", port)
-    message := []byte(fmt.Sprintf("SESSION|%s|%d", sessionName, port))
 
     go func() {
         for {
-            _, err := conn.Write(message)
-            if err != nil {
-                fmt.Println("Fehler beim Senden der Broadcast-Nachricht:", err)
+            select {
+                case <- Quit:
+                return
+            default:
+
+                for udpPort := broadcastMin; udpPort <= broadcastMax; udpPort ++{
+
+                    message := []byte(fmt.Sprintf("SESSION|%s|%d|%d", sessionName, port, network.UdpPort))
+                    addr, err := net.ResolveUDPAddr("udp", broadcastAddr + ":" + strconv.Itoa(udpPort))
+                    if err != nil {
+                        fmt.Println("Fehler beim Auflösen der Broadcast-Adresse:", err)
+                        return
+                    }
+
+                    conn, err := net.DialUDP("udp", nil, addr)
+                    if err != nil {
+                        fmt.Println("Fehler beim Öffnen der UDP-Verbindung:", err)
+                        return
+                    }
+                    defer conn.Close()
+                    _, err = conn.Write(message)
+                    if err != nil {
+                        fmt.Println("Fehler beim Senden der Broadcast-Nachricht:", err)
+                    }
+                }
+                    time.Sleep(3 * time.Second)
+                }
             }
-            time.Sleep(5 * time.Second)
-        }
-    }()
+        }()
 
     for {
-        conn, err := listener.Accept()
-        if err != nil {
-            fmt.Println("Fehler beim Akzeptieren der Verbindung:", err)
-            continue
-        }
-        go HandlePeer(conn)
+        select {
+            case <- Quit:
+            return
+        default:
+            conn, err := listener.Accept()
+            if err != nil {
+                fmt.Println("Fehler beim Akzeptieren der Verbindung:", err)
+                continue
+            }
+                network.Clients = append(network.Clients, conn) // neuer client
+                SendInitRGA(*e.RGA, conn)
+            }
     }
 }
 
-func JoinSession(sessionName string) {
+func (network *Network) JoinSession(e *editor.Editor, sessionName string) {
     sessionMutex.Lock()
-    session, exists := Sessions[sessionName]
+    session, exists := network.Sessions[sessionName]
     sessionMutex.Unlock()
 
     if !exists {
@@ -156,40 +185,69 @@ func JoinSession(sessionName string) {
         fmt.Println("Fehler beim Verbinden mit der Sitzung:", err)
         return
     }
-    defer conn.Close()
 
-    fmt.Printf("Verbunden mit Sitzung %s\n", sessionName)
-    HandlePeer(conn)
+    tmp := make([]byte, 500)
+    _, err = conn.Read(tmp)
+    tmpbuff := bytes.NewBuffer(tmp)
+    fmt.Println(tmpbuff)
+
+    tmpstruct := new(crdt.RGA)
+
+    gobobj := gob.NewDecoder(tmpbuff)
+
+    gobobj.Decode(tmpstruct)
+    *e.RGA = *tmpstruct
+    
+    network.Host = conn
 }
 
-func HandlePeer(conn net.Conn) {
-    defer conn.Close()
-    fmt.Printf("Verbunden mit Peer: %s\n", conn.RemoteAddr())
+func SendInitRGA(rga crdt.RGA, conn net.Conn){
 
-    reader := bufio.NewReader(os.Stdin)
-    netReader := bufio.NewReader(conn)
+    bin_buf := new(bytes.Buffer)
+    gobobj := gob.NewEncoder(bin_buf)
+    gobobj.Encode(rga)
+    conn.Write(bin_buf.Bytes())
+}
 
-    for {
-        fmt.Print("Nachricht eingeben (oder 'exit' zum Beenden): ")
-        message, _ := reader.ReadString('\n')
-        message = strings.TrimSpace(message)
+func getRandomPort(min, max int) int {
+	return rand.Intn(max-min+1) + min
+}
 
-        if message == "exit" {
-            return
-        }
+func isLocalAddress(ipToCheck string) (bool, error) {
+	// Wandelt die Eingabe-IP in ein net.IP-Objekt um
+	ip := net.ParseIP(ipToCheck)
+	if ip == nil {
+		return false, fmt.Errorf("ungültige IP-Adresse: %s", ipToCheck)
+	}
 
-        _, err := conn.Write([]byte(message + "\n"))
-        if err != nil {
-            fmt.Println("Fehler beim Senden der Nachricht:", err)
-            return
-        }
+	// Holt alle Netzwerkschnittstellen
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false, fmt.Errorf("Fehler beim Abrufen der Netzwerkschnittstellen: %v", err)
+	}
 
-        response, err := netReader.ReadString('\n')
-        if err != nil {
-            fmt.Println("Fehler beim Lesen der Antwort:", err)
-            return
-        }
+	// Iteriere über alle Interfaces und überprüfe die IP-Adressen
+	for _, i := range interfaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
 
-        fmt.Printf("Antwort erhalten: %s", response)
-    }
+		for _, addr := range addrs {
+			// Prüfen, ob es sich um eine IP-Adresse handelt
+			var ipNet *net.IPNet
+			var ok bool
+			if ipNet, ok = addr.(*net.IPNet); !ok {
+				continue
+			}
+
+			// Überprüfen, ob die IP-Adresse zu diesem Interface gehört
+			if ipNet.IP.Equal(ip) {
+				return true, nil
+			}
+		}
+	}
+
+	// IP-Adresse wurde nicht gefunden
+	return false, nil
 }

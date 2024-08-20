@@ -92,8 +92,8 @@ func (m MenuModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
-    m.setSessions()
+func (m MenuModel) Update(msg tea.Msg, network *network.Network) (MenuModel, tea.Cmd) {
+    m.setSessions(network)
 
 	var cmd tea.Cmd
 	*m.lists[m.current], cmd = m.lists[m.current].Update(msg)
@@ -151,17 +151,17 @@ func (m MenuModel) View() string {
 	return m.lists[m.current].View()
 }
 
-func (m *MenuModel) setSessions(){
-
-    sessionItems := []list.Item  {
-		MenuItem{title: "Back to Main Menu", desc: "Return to main menu"},
-		MenuItem{title: "Back to Main Menu", desc: "Return to main menu"},
-		MenuItem{title: "Back to Editor", desc: "Return to the editor"},
-    }
-
+func (m *MenuModel) setSessions(network *network.Network){
+    
+    sessionItems := []list.Item{}
+    
     for name, session := range network.Sessions{
         sessionItems = append(sessionItems, MenuItem{title: name, desc: "IP: " + session.IP + ":" + strconv.Itoa(session.Port)})
     }
+
+    sessionItems = append(sessionItems, MenuItem{title: "Back to Main Menu", desc: "Return to main menu"})
+    sessionItems = append(sessionItems, MenuItem{title: "Back to Main Menu", desc: "Return to main menu"})
+    sessionItems = append(sessionItems, MenuItem{title: "Back to Editor", desc: "Return to the editor"})
 
 	m.lists["join"].SetItems(sessionItems)
 }

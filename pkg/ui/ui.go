@@ -2,15 +2,17 @@ package ui
 
 import (
 	"edigo/pkg/editor"
+	"edigo/pkg/network"
 	"fmt"
 	"strings"
+
+	"os"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"os"
-	"time"
 )
 
 type UIModel struct {
@@ -23,6 +25,7 @@ type UIModel struct {
 	Menu           MenuModel
 	ShowMenu       bool
 	UnsavedChanges bool
+    Network      network.Network
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
@@ -46,6 +49,7 @@ func NewUIModel(content string, filePath string) *UIModel {
 		Menu:           NewMenuModel(),
 		ShowMenu:       false,
 		UnsavedChanges: false,
+        Network: network.NewNetwork(),
 	}
 }
 
@@ -90,7 +94,7 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.Menu, cmd = m.Menu.Update(msg)
+	m.Menu, cmd = m.Menu.Update(msg, &m.Network)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -116,8 +120,9 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
-				fmt.Printf("Joining session: %s\n", msg.Data)
+                m.Network.JoinSession(m.Editor, msg.Data)
 				m.ShowMenu = false
+		        m.Viewport.SetContent(m.renderContent())
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")

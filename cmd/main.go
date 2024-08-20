@@ -1,7 +1,6 @@
 package main
 
 import (
-	"edigo/pkg/network"
 	"edigo/pkg/ui"
 	"fmt"
 	"io/ioutil"
@@ -24,10 +23,12 @@ func main() {
 		os.Exit(1)
 	}
 
-    go network.ListenForBroadcasts()
-    go network.BroadcastSession()
 
 	model := ui.NewUIModel(string(content), filePath) // Pass file content and path to the model
+
+    go model.Network.ListenForBroadcasts()
+    go model.Network.BroadcastSession(model.Editor)
+
 	p := tea.NewProgram(model)
 	if err := p.Start(); err != nil {
 		panic(err)

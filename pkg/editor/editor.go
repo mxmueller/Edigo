@@ -2,6 +2,7 @@ package editor
 
 import (
 	"edigo/pkg/crdt"
+	"edigo/pkg/network"
 	"fmt"
 	"strings"
 )
