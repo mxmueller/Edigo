@@ -14,15 +14,15 @@ import (
 )
 
 type UIModel struct {
-	Editor       *editor.Editor
-	InputHandler *editor.InputHandler
-	Viewport     viewport.Model
-	QuitKey      key.Binding
-	SaveKey      key.Binding
-	MenuKey      key.Binding
-	FilePath     string
-	Menu         MenuModel
-	ShowMenu     bool
+	Editor         *editor.Editor
+	InputHandler   *editor.InputHandler
+	Viewport       viewport.Model
+	SaveKey        key.Binding
+	MenuKey        key.Binding
+	FilePath       string
+	Menu           MenuModel
+	ShowMenu       bool
+	UnsavedChanges bool
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
@@ -34,10 +34,6 @@ func NewUIModel(content string, filePath string) *UIModel {
 		Editor:       editorInstance,
 		InputHandler: editor.NewInputHandler(editorInstance),
 		Viewport:     vp,
-		QuitKey: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
-		),
 		SaveKey: key.NewBinding(
 			key.WithKeys("ctrl+s"),
 			key.WithHelp("ctrl+s", "save"),
@@ -46,9 +42,10 @@ func NewUIModel(content string, filePath string) *UIModel {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "menu"),
 		),
-		FilePath: filePath,
-		Menu:     NewMenuModel(),
-		ShowMenu: false,
+		FilePath:       filePath,
+		Menu:           NewMenuModel(),
+		ShowMenu:       false,
+		UnsavedChanges: false,
 	}
 }
 
@@ -65,17 +62,16 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
-		case key.Matches(msg, m.QuitKey):
-			return m, tea.Quit
 		case key.Matches(msg, m.SaveKey):
 			m.saveFile()
 			return m, nil
 		case key.Matches(msg, m.MenuKey):
 			m.ShowMenu = true
-			m.Menu.current = "main" // Ensure we're at the main menu when opening
+			m.Menu.current = "main"
 			return m, nil
 		default:
 			m.InputHandler.HandleKeyMsg(msg)
+			m.UnsavedChanges = true
 			m.Viewport.SetContent(m.renderContent())
 		}
 
@@ -112,20 +108,22 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveFile()
 			m.ShowMenu = false
 		case QuitAction:
+			if m.UnsavedChanges {
+				// Here you might want to add a confirmation dialog
+				// For now, we'll just print a warning
+				fmt.Println("Warning: You have unsaved changes!")
+			}
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
 				fmt.Printf("Joining session: %s\n", msg.Data)
-				// TODO: Implement actual session joining logic
 				m.ShowMenu = false
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")
-			// TODO: Implement public session creation logic
 			m.ShowMenu = false
 		case CreatePrivateSessionAction:
 			fmt.Println("Creating private session...")
-			// TODO: Implement private session creation logic (with password)
 			m.ShowMenu = false
 		case BackToEditorAction:
 			m.ShowMenu = false
@@ -147,36 +145,51 @@ func (m *UIModel) renderContent() string {
 	lineNumbers := m.Editor.GetLineNumbers()
 	document := m.Editor.RenderDocument()
 
-	lineNumberWidth := len(fmt.Sprintf("%d", strings.Count(document, "\n")+1)) + 2
+	lineNumberWidth := len(fmt.Sprintf("%d", strings.Count(document, "\n")+1))
 
 	var output strings.Builder
 
 	lines := strings.Split(document, "\n")
 	numberLines := strings.Split(lineNumbers, "\n")
 
-	totalLines := m.Viewport.Height - 2 // Subtracting 2 for filename and empty line
+	totalLines := m.Viewport.Height - 3 // Subtracting 3 for filename, empty line, and status bar
 
 	for i := 0; i < totalLines; i++ {
 		if i < len(lines) {
 			if i < len(numberLines) {
-				output.WriteString(fmt.Sprintf("%-*s", lineNumberWidth, numberLines[i]))
+				output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, numberLines[i])))
 			} else {
-				output.WriteString(fmt.Sprintf("%-*s", lineNumberWidth, ""))
+				output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, "")))
 			}
-			output.WriteString(lines[i])
+			output.WriteString(" " + lines[i])
 		} else {
-			output.WriteString(fmt.Sprintf("%-*s", lineNumberWidth, "~"))
+			output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, "~")))
 		}
 		output.WriteString("\n")
 	}
 
-	header := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		Padding(0, 1).
-		Render(fmt.Sprintf("File: %s", m.FilePath))
+	header := RenderHeader(fmt.Sprintf("File: %s", m.FilePath))
+	statusBar := m.renderStatusBar()
 
-	return fmt.Sprintf("%s\n%s", header, output.String())
+	return fmt.Sprintf("%s\n%s\n%s", header, output.String(), statusBar)
+}
+
+func (m *UIModel) renderStatusBar() string {
+	unsavedIndicator := " "
+	if m.UnsavedChanges {
+		unsavedIndicator = "*"
+	}
+
+	leftStatus := fmt.Sprintf("%s%s", unsavedIndicator, m.FilePath)
+	rightStatus := "Press ESC for menu"
+
+	padding := strings.Repeat(" ", m.Viewport.Width-lipgloss.Width(leftStatus)-lipgloss.Width(rightStatus))
+
+	return lipgloss.JoinHorizontal(lipgloss.Left,
+		RenderStatusBar(leftStatus),
+		padding,
+		RenderStatusBar(rightStatus),
+	)
 }
 
 func (m *UIModel) saveFile() {
@@ -184,6 +197,8 @@ func (m *UIModel) saveFile() {
 	err := os.WriteFile(m.FilePath, []byte(content), 0644)
 	if err != nil {
 		fmt.Printf("Error saving file: %v\n", err)
+	} else {
+		m.UnsavedChanges = false
 	}
 }
 

@@ -3,7 +3,6 @@ package ui
 import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type MenuItem struct {
@@ -85,9 +84,10 @@ func createList(title string, items []list.Item) *list.Model {
 	l.Title = title
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
-	l.Styles.Title = lipgloss.NewStyle().MarginLeft(2).Bold(true)
-	l.Styles.PaginationStyle = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
-	l.Styles.HelpStyle = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
+	l.Styles.Title = MenuTitleStyle
+	l.Styles.PaginationStyle = MenuItemStyle.Copy().PaddingLeft(4)
+	l.Styles.HelpStyle = MenuItemStyle.Copy().PaddingBottom(1)
+
 	return &l
 }
 
@@ -149,5 +149,5 @@ func (m MenuModel) handleEnter() (MenuModel, tea.Cmd) {
 }
 
 func (m MenuModel) View() string {
-	return "\n" + m.lists[m.current].View()
+	return m.lists[m.current].View()
 }
