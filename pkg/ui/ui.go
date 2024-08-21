@@ -2,9 +2,7 @@ package ui
 
 import (
 	"edigo/pkg/editor"
-	"edigo/pkg/network"
 	"fmt"
-	"strings"
 
 	"os"
 	"time"
@@ -12,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type UIModel struct {
@@ -29,9 +26,12 @@ type UIModel struct {
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
+    update := make(chan struct{}, 1)
 	siteID := generateSiteID()
 	editorInstance := editor.NewEditor(content, siteID)
 	vp := viewport.New(80, 24)
+    editorInstance.Viewport = &vp
+    editorInstance.Update = update
 
 	return &UIModel{
 		Editor:       editorInstance,
@@ -54,14 +54,18 @@ func NewUIModel(content string, filePath string) *UIModel {
 }
 
 func (m *UIModel) Init() tea.Cmd {
-	m.Viewport.SetContent(m.renderContent())
-	return tea.EnterAltScreen
+    m.Viewport.SetContent(m.Editor.RenderContent())
+    	return tea.Batch(
+        tea.EnterAltScreen,
+		waitForActivity(m.updateEvent),   // wait for activity
+	)
 }
 
 func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.ShowMenu {
 		return m.updateMenu(msg)
 	}
+	m.Viewport.SetContent(m.Editor.RenderContent())
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -76,7 +80,7 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.InputHandler.HandleKeyMsg(msg)
 			m.UnsavedChanges = true
-			m.Viewport.SetContent(m.renderContent())
+			m.Viewport.SetContent(m.Editor.RenderContent())
 		}
 
 	case tea.WindowSizeMsg:
@@ -86,15 +90,24 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Menu.lists[k].SetWidth(msg.Width)
 			m.Menu.lists[k].SetHeight(msg.Height)
 		}
-		m.Viewport.SetContent(m.renderContent())
+		m.Viewport.SetContent(m.Editor.RenderContent())
+	case editor.RemoteChange:
+		m.Viewport.SetContent(m.Editor.RenderContent())
+        return m, waitForActivity(m.updateEvent)
 	}
 
 	return m, nil
 }
 
+func waitForActivity(sub chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		return editor.RemoteChange(<-sub)
+	}
+}
+
 func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.Menu, cmd = m.Menu.Update(msg, &m.Network)
+	m.Menu, cmd = m.Menu.Update(msg, m.Editor.Network)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -120,9 +133,9 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
-                m.Network.JoinSession(m.Editor, msg.Data)
+                *m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data) // TODO implement Error handeling
 				m.ShowMenu = false
-		        m.Viewport.SetContent(m.renderContent())
+		        m.Viewport.SetContent(m.Editor.RenderContent())
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")
@@ -144,57 +157,6 @@ func (m *UIModel) View() string {
 		return m.Menu.View()
 	}
 	return m.Viewport.View()
-}
-
-func (m *UIModel) renderContent() string {
-	lineNumbers := m.Editor.GetLineNumbers()
-	document := m.Editor.RenderDocument()
-
-	lineNumberWidth := len(fmt.Sprintf("%d", strings.Count(document, "\n")+1))
-
-	var output strings.Builder
-
-	lines := strings.Split(document, "\n")
-	numberLines := strings.Split(lineNumbers, "\n")
-
-	totalLines := m.Viewport.Height - 3 // Subtracting 3 for filename, empty line, and status bar
-
-	for i := 0; i < totalLines; i++ {
-		if i < len(lines) {
-			if i < len(numberLines) {
-				output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, numberLines[i])))
-			} else {
-				output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, "")))
-			}
-			output.WriteString(" " + lines[i])
-		} else {
-			output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, "~")))
-		}
-		output.WriteString("\n")
-	}
-
-	header := RenderHeader(fmt.Sprintf("File: %s", m.FilePath))
-	statusBar := m.renderStatusBar()
-
-	return fmt.Sprintf("%s\n%s\n%s", header, output.String(), statusBar)
-}
-
-func (m *UIModel) renderStatusBar() string {
-	unsavedIndicator := " "
-	if m.UnsavedChanges {
-		unsavedIndicator = "*"
-	}
-
-	leftStatus := fmt.Sprintf("%s%s", unsavedIndicator, m.FilePath)
-	rightStatus := "Press ESC for menu"
-
-	padding := strings.Repeat(" ", m.Viewport.Width-lipgloss.Width(leftStatus)-lipgloss.Width(rightStatus))
-
-	return lipgloss.JoinHorizontal(lipgloss.Left,
-		RenderStatusBar(leftStatus),
-		padding,
-		RenderStatusBar(rightStatus),
-	)
 }
 
 func (m *UIModel) saveFile() {

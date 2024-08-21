@@ -3,7 +3,6 @@ package network
 import (
 	"bytes"
 	"edigo/pkg/crdt"
-	"edigo/pkg/editor"
 	"encoding/gob"
 	"fmt"
 	"math/rand"
@@ -15,7 +14,7 @@ import (
 )
 
 const (
-    broadcastAddr = "10.10.42.255"
+    broadcastAddr = "192.168.178.255"
     broadcastMin = 12340
     broadcastMax = 12344
     tcpBasePort   = 12346
@@ -42,7 +41,7 @@ var (
     Quit = make(chan bool)
 )
 
-func NewNetwork() Network{
+func NewNetwork() *Network{
     
     udpPort := 0
 
@@ -66,7 +65,7 @@ func NewNetwork() Network{
         fmt.Println("Kein freier Port mehr verfügbar. Stelle eine größere Portrange ein")
     }
 
-    return Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort}
+    return &Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort}
 }
 
 func (network *Network) ListenForBroadcasts()  {
@@ -111,7 +110,7 @@ func (network *Network) ListenForBroadcasts()  {
     }
 }
 
-func (network *Network) BroadcastSession(e *editor.Editor) {
+func (network *Network) BroadcastSession(rga *crdt.RGA) {
 
     listener, err := net.Listen("tcp", ":0")
     if err != nil {
@@ -165,40 +164,48 @@ func (network *Network) BroadcastSession(e *editor.Editor) {
                 continue
             }
                 network.Clients = append(network.Clients, conn) // neuer client
-                SendInitRGA(*e.RGA, conn)
+                SendInitRGA(*rga, conn)
             }
     }
 }
 
-func (network *Network) JoinSession(e *editor.Editor, sessionName string) {
+func (network *Network) JoinSession(sessionName string) crdt.RGA {
     sessionMutex.Lock()
     session, exists := network.Sessions[sessionName]
     sessionMutex.Unlock()
 
     if !exists {
         fmt.Println("Sitzung nicht gefunden.")
-        return
+        return crdt.RGA{}
     }
 
     conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", session.IP, session.Port))
     if err != nil {
         fmt.Println("Fehler beim Verbinden mit der Sitzung:", err)
-        return
+        return crdt.RGA{}
     }
 
     tmp := make([]byte, 500)
     _, err = conn.Read(tmp)
     tmpbuff := bytes.NewBuffer(tmp)
-    fmt.Println(tmpbuff)
 
     tmpstruct := new(crdt.RGA)
 
     gobobj := gob.NewDecoder(tmpbuff)
 
     gobobj.Decode(tmpstruct)
-    *e.RGA = *tmpstruct
     
     network.Host = conn
+    return *tmpstruct
+}
+
+func (network *Network) SendOperation(op crdt.Operation, conn net.Conn){
+
+    bin_buf := new(bytes.Buffer)
+    gobobj := gob.NewEncoder(bin_buf)
+    gobobj.Encode(op)
+    conn.Write(bin_buf.Bytes())
+
 }
 
 func SendInitRGA(rga crdt.RGA, conn net.Conn){
