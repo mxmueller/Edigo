@@ -160,6 +160,7 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
         case CreatePrivateSessionAction:
 			fmt.Println("Creating private session...")
+            // TODO
 			m.ShowMenu = false
 		case BackToEditorAction:
 			m.ShowMenu = false
@@ -178,7 +179,7 @@ func (m *UIModel) View() string {
 }
 
 func (m *UIModel) saveFile() {
-    if (m.Editor.Network.CurrentSession != "" || !m.Editor.Network.IsHost){
+    if (m.Editor.Network.CurrentSession != "" && !m.Editor.Network.IsHost){
         return
     }
 

@@ -83,6 +83,7 @@ func (e *Editor) HandleConnections() {
 
     for {
         newConn := <- e.NewConnection
+        e.Update<-struct{}{}
         go e.reciveInput(newConn)
     }
 }
@@ -191,7 +192,9 @@ func (e *Editor) RenderContent() string {
 
     headerMsg := "" 
 
-    if(e.Network.IsHost || e.Network.CurrentSession == ""){
+    if(e.Network.IsHost){
+        headerMsg = fmt.Sprintf("File: %s Clients: %d", e.FilePath, len(e.Network.Clients))
+    }else if(e.Network.CurrentSession == ""){
         headerMsg = fmt.Sprintf("File: %s", e.FilePath)
     }
     if(e.Network.Host != nil){

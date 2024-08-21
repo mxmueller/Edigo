@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,7 +56,6 @@ func NewNetwork() *Network{
 
         conn, err := net.ListenUDP("udp", addr)
         if err != nil {
-            fmt.Println("Fehler beim Öffnen der UDP-Verbindung:", err)
             continue
         }
         udpPort = port
@@ -64,6 +64,7 @@ func NewNetwork() *Network{
     }
     if udpPort == 0 {
         fmt.Println("Kein freier Port mehr verfügbar. Stelle eine größere Portrange ein")
+        os.Exit(1)
     }
 
     return &Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort, CurrentSession: ""}
@@ -188,7 +189,7 @@ func (network *Network) JoinSession(sessionName string) crdt.RGA {
         return crdt.RGA{}
     }
 
-    tmp := make([]byte, 12000)
+    tmp := make([]byte, 2024)
     _, err = conn.Read(tmp)
     tmpbuff := bytes.NewBuffer(tmp)
 
