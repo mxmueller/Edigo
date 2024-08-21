@@ -26,7 +26,6 @@ func main() {
 	model := ui.NewUIModel(string(content), filePath) // Pass file content and path to the model
 
     go model.Editor.Network.ListenForBroadcasts()
-    go model.Editor.Network.BroadcastSession(model.Editor.RGA)
 
 	p := tea.NewProgram(model)
 	if err := p.Start(); err != nil {

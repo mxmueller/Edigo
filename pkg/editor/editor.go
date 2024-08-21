@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
@@ -20,7 +19,10 @@ type Editor struct {
 	RGA *crdt.RGA
     Viewport *viewport.Model
     Network *network.Network
-    Update chan struct{}
+    FilePath string
+    Update chan struct{} // UpdateIU
+    NewConnection chan net.Conn
+    Error string
 }
 
 func NewEditor(content string, siteID string) *Editor {
@@ -28,9 +30,15 @@ func NewEditor(content string, siteID string) *Editor {
 	for _, char := range content {
 		rga.LocalInsert(char)
 	}
+
+    newConnection := make(chan net.Conn, 1)
+    network := network.NewNetwork()
+    network.NewConnection = newConnection
+
 	return &Editor{
 		RGA: rga,
-        Network: network.NewNetwork(),
+        Network: network,
+        NewConnection: newConnection,
 	}
 }
 
@@ -46,12 +54,10 @@ func (e *Editor) DeleteCharacterBeforeCursor() {
 
 func (e *Editor) MoveCursorLeft() {
 	e.RGA.MoveCursorLeft()
-    e.reciveInput()
 }
 
 func (e *Editor) MoveCursorRight() {
 	e.RGA.MoveCursorRight()
-    e.reciveInput()
 }
 
 func (e *Editor) MoveCursorUp() {
@@ -73,35 +79,51 @@ func (e *Editor) sendToRemote(op crdt.Operation){
     }
 }
 
-func (e *Editor) reciveInput() {
+func (e *Editor) HandleConnections() {
 
-        var wg sync.WaitGroup
-
-        // Öffne UDP-Verbindungen für jeden Port im Adresspool in separaten Goroutinen
-        for _, conn := range e.Network.Clients {
-            wg.Add(1)
-            go func(conn net.Conn) {
-                defer wg.Done()
-
-                // Empfange Nachrichten und gib sie aus
-                for {
-                    buf := make([]byte, 2064)
-                    _, err := conn.Read(buf)
-                    if err != nil {
-                        return
-                    }
-                    tmpbuff := bytes.NewBuffer(buf)
-                    incomingOp := new(crdt.Operation)
-
-                    gobobj := gob.NewDecoder(tmpbuff)
-                    gobobj.Decode(incomingOp)
-                    e.RGA.ApplyOperation(*incomingOp)
-                    e.Update <- struct{}{}
-                }
-            }(conn)
-        }
+    for {
+        newConn := <- e.NewConnection
+        go e.reciveInput(newConn)
+    }
 }
 
+func (e *Editor) reciveInput(conn net.Conn) {
+
+        defer conn.Close()
+            // Empfange Nachrichten und gib sie aus
+        for {
+            buf := make([]byte, 2064)
+            _, err := conn.Read(buf)
+            if err != nil { // TODO make error msg check
+                if e.Network.IsHost{
+                    // client hat Verbindung geschlossen
+                    e.Network.RemoveClient(conn)
+                }
+                if e.Network.Host != nil {
+                    e.Network.HostClosedSession()
+                    // falls man will sollte man hier den alten Content wieder reinladen
+                }
+                e.Update<- struct{}{}
+                return
+            }
+            tmpbuff := bytes.NewBuffer(buf)
+            incomingOp := new(crdt.Operation)
+
+            gobobj := gob.NewDecoder(tmpbuff)
+            gobobj.Decode(incomingOp)
+            e.RGA.ApplyOperation(*incomingOp)
+            e.Update <- struct{}{}
+
+            if e.Network.IsHost{ // forward to other editor
+                for _, sendConn := range e.Network.Clients{
+                    if sendConn == conn{
+                        continue
+                    } 
+                    e.Network.SendOperation(*incomingOp, sendConn)
+                }
+        }
+    }
+}
 
 func (e *Editor) RenderDocument() string {
 	var result strings.Builder
@@ -140,7 +162,6 @@ func (e *Editor) RenderDocumentWithoutLineNumbers() string {
 	return e.RGA.GetText()
 }
 
-
 func (e *Editor) RenderContent() string {
 	lineNumbers := e.GetLineNumbers()
 	document := e.RenderDocument()
@@ -168,11 +189,29 @@ func (e *Editor) RenderContent() string {
 		output.WriteString("\n")
 	}
 
+    headerMsg := "" 
+
+    if(e.Network.IsHost || e.Network.CurrentSession == ""){
+        headerMsg = fmt.Sprintf("File: %s", e.FilePath)
+    }
+    if(e.Network.Host != nil){
+        headerMsg = fmt.Sprintf("Session: %s", e.Network.CurrentSession)
+    }
+
+
 	header := lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderBottom(true).
 		Padding(0, 1).
-		Render(fmt.Sprintf("File: %s", "test"))
+		Render(headerMsg)
 
-	return fmt.Sprintf("%s\n%s", header, output.String())
+	fotter := lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+        BorderTop(true).
+		Padding(0, 1).
+		Render(e.Error)
+
+    e.Error = ""
+
+	return fmt.Sprintf("%s\n%s\n%s", header, output.String(), fotter)
 }

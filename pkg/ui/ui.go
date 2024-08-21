@@ -18,11 +18,10 @@ type UIModel struct {
 	Viewport       viewport.Model
 	SaveKey        key.Binding
 	MenuKey        key.Binding
-	FilePath       string
 	Menu           MenuModel
 	ShowMenu       bool
 	UnsavedChanges bool
-    Network      network.Network
+    updateEvent   chan struct{}
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
@@ -32,6 +31,7 @@ func NewUIModel(content string, filePath string) *UIModel {
 	vp := viewport.New(80, 24)
     editorInstance.Viewport = &vp
     editorInstance.Update = update
+    editorInstance.FilePath = filePath
 
 	return &UIModel{
 		Editor:       editorInstance,
@@ -45,11 +45,10 @@ func NewUIModel(content string, filePath string) *UIModel {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "menu"),
 		),
-		FilePath:       filePath,
 		Menu:           NewMenuModel(),
 		ShowMenu:       false,
 		UnsavedChanges: false,
-        Network: network.NewNetwork(),
+        updateEvent: update,
 	}
 }
 
@@ -133,14 +132,33 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
-                *m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data) // TODO implement Error handeling
+
 				m.ShowMenu = false
+                if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
+                    m.Editor.Error = "Already in a Session"
+		            m.Viewport.SetContent(m.Editor.RenderContent())
+                    break
+                }
+
+                go m.Editor.HandleConnections()
+                *m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data) // TODO implement Error handeling
 		        m.Viewport.SetContent(m.Editor.RenderContent())
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")
+
+            m.ShowMenu = false
+            if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
+                m.Editor.Error = "Already in a Session"
+                m.Viewport.SetContent(m.Editor.RenderContent())
+                break
+            }
+
+            go m.Editor.HandleConnections()
+            go m.Editor.Network.BroadcastSession(m.Editor.RGA)
 			m.ShowMenu = false
-		case CreatePrivateSessionAction:
+		
+        case CreatePrivateSessionAction:
 			fmt.Println("Creating private session...")
 			m.ShowMenu = false
 		case BackToEditorAction:
@@ -160,8 +178,12 @@ func (m *UIModel) View() string {
 }
 
 func (m *UIModel) saveFile() {
-	content := m.Editor.RenderDocumentWithoutLineNumbers()
-	err := os.WriteFile(m.FilePath, []byte(content), 0644)
+    if (m.Editor.Network.CurrentSession != "" || !m.Editor.Network.IsHost){
+        return
+    }
+
+	content := m.Editor.RenderDocumentWithoutLineNumbers() // Max fragen ob man Session auch abspeichern kann. Wie Snapshots
+	err := os.WriteFile(m.Editor.FilePath, []byte(content), 0644)
 	if err != nil {
 		fmt.Printf("Error saving file: %v\n", err)
 	} else {

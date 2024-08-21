@@ -20,12 +20,13 @@ const (
     tcpBasePort   = 12346
 )
 
-type Network struct{
+type Network struct{ // das state managment is ehrenlos
     IsHost bool
     Host net.Conn // isHost = flase
     Clients []net.Conn // isHost = true
     Sessions     map[string]Session // found connections
-
+    NewConnection chan net.Conn
+    CurrentSession string // "" -> keine Session offen
     UdpPort int
 }
 
@@ -65,7 +66,7 @@ func NewNetwork() *Network{
         fmt.Println("Kein freier Port mehr verfügbar. Stelle eine größere Portrange ein")
     }
 
-    return &Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort}
+    return &Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort, CurrentSession: ""}
 }
 
 func (network *Network) ListenForBroadcasts()  {
@@ -164,6 +165,8 @@ func (network *Network) BroadcastSession(rga *crdt.RGA) {
                 continue
             }
                 network.Clients = append(network.Clients, conn) // neuer client
+                network.NewConnection <- conn
+                network.IsHost = true
                 SendInitRGA(*rga, conn)
             }
     }
@@ -185,7 +188,7 @@ func (network *Network) JoinSession(sessionName string) crdt.RGA {
         return crdt.RGA{}
     }
 
-    tmp := make([]byte, 500)
+    tmp := make([]byte, 12000)
     _, err = conn.Read(tmp)
     tmpbuff := bytes.NewBuffer(tmp)
 
@@ -196,6 +199,10 @@ func (network *Network) JoinSession(sessionName string) crdt.RGA {
     gobobj.Decode(tmpstruct)
     
     network.Host = conn
+    network.NewConnection <- conn
+    network.IsHost = false
+    network.CurrentSession = session.Name
+
     return *tmpstruct
 }
 
@@ -206,6 +213,30 @@ func (network *Network) SendOperation(op crdt.Operation, conn net.Conn){
     gobobj.Encode(op)
     conn.Write(bin_buf.Bytes())
 
+}
+
+func (network *Network) CloseAsHost(){
+    
+    for _, conn := range network.Clients{
+        conn.Close()
+    }
+    network.CurrentSession = ""
+    network.IsHost = false
+    
+}
+
+func (network *Network) HostClosedSession(){
+    network.Host = nil
+    network.CurrentSession = ""
+}
+
+func (network *Network) RemoveClient(conn net.Conn){
+    for i, c := range network.Clients {
+        if c == conn {
+            network.Clients = append((network.Clients)[:i], (network.Clients)[i+1:]...)
+            return
+        }
+    }
 }
 
 func SendInitRGA(rga crdt.RGA, conn net.Conn){
