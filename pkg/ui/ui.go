@@ -3,14 +3,13 @@ package ui
 import (
 	"edigo/pkg/editor"
 	"fmt"
-	"strings"
+
+	"os"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"os"
-	"time"
 )
 
 type UIModel struct {
@@ -19,16 +18,20 @@ type UIModel struct {
 	Viewport       viewport.Model
 	SaveKey        key.Binding
 	MenuKey        key.Binding
-	FilePath       string
 	Menu           MenuModel
 	ShowMenu       bool
 	UnsavedChanges bool
+    updateEvent   chan struct{}
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
+    update := make(chan struct{}, 1)
 	siteID := generateSiteID()
 	editorInstance := editor.NewEditor(content, siteID)
 	vp := viewport.New(80, 24)
+    editorInstance.Viewport = &vp
+    editorInstance.Update = update
+    editorInstance.FilePath = filePath
 
 	return &UIModel{
 		Editor:       editorInstance,
@@ -42,22 +45,26 @@ func NewUIModel(content string, filePath string) *UIModel {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "menu"),
 		),
-		FilePath:       filePath,
 		Menu:           NewMenuModel(),
 		ShowMenu:       false,
 		UnsavedChanges: false,
+        updateEvent: update,
 	}
 }
 
 func (m *UIModel) Init() tea.Cmd {
-	m.Viewport.SetContent(m.renderContent())
-	return tea.EnterAltScreen
+    m.Viewport.SetContent(m.Editor.RenderContent())
+    	return tea.Batch(
+        tea.EnterAltScreen,
+		waitForActivity(m.updateEvent),   // wait for activity
+	)
 }
 
 func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.ShowMenu {
 		return m.updateMenu(msg)
 	}
+	m.Viewport.SetContent(m.Editor.RenderContent())
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -72,7 +79,7 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.InputHandler.HandleKeyMsg(msg)
 			m.UnsavedChanges = true
-			m.Viewport.SetContent(m.renderContent())
+			m.Viewport.SetContent(m.Editor.RenderContent())
 		}
 
 	case tea.WindowSizeMsg:
@@ -82,15 +89,24 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Menu.lists[k].SetWidth(msg.Width)
 			m.Menu.lists[k].SetHeight(msg.Height)
 		}
-		m.Viewport.SetContent(m.renderContent())
+		m.Viewport.SetContent(m.Editor.RenderContent())
+	case editor.RemoteChange:
+		m.Viewport.SetContent(m.Editor.RenderContent())
+        return m, waitForActivity(m.updateEvent)
 	}
 
 	return m, nil
 }
 
+func waitForActivity(sub chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		return editor.RemoteChange(<-sub)
+	}
+}
+
 func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.Menu, cmd = m.Menu.Update(msg)
+	m.Menu, cmd = m.Menu.Update(msg, m.Editor.Network)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -116,14 +132,35 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
-				fmt.Printf("Joining session: %s\n", msg.Data)
+
 				m.ShowMenu = false
+                if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
+                    m.Editor.Error = "Already in a Session"
+		            m.Viewport.SetContent(m.Editor.RenderContent())
+                    break
+                }
+
+                go m.Editor.HandleConnections()
+                *m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data) // TODO implement Error handeling
+		        m.Viewport.SetContent(m.Editor.RenderContent())
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")
+
+            m.ShowMenu = false
+            if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
+                m.Editor.Error = "Already in a Session"
+                m.Viewport.SetContent(m.Editor.RenderContent())
+                break
+            }
+
+            go m.Editor.HandleConnections()
+            go m.Editor.Network.BroadcastSession(m.Editor.RGA)
 			m.ShowMenu = false
-		case CreatePrivateSessionAction:
+		
+        case CreatePrivateSessionAction:
 			fmt.Println("Creating private session...")
+            // TODO
 			m.ShowMenu = false
 		case BackToEditorAction:
 			m.ShowMenu = false
@@ -141,60 +178,13 @@ func (m *UIModel) View() string {
 	return m.Viewport.View()
 }
 
-func (m *UIModel) renderContent() string {
-	lineNumbers := m.Editor.GetLineNumbers()
-	document := m.Editor.RenderDocument()
-
-	lineNumberWidth := len(fmt.Sprintf("%d", strings.Count(document, "\n")+1))
-
-	var output strings.Builder
-
-	lines := strings.Split(document, "\n")
-	numberLines := strings.Split(lineNumbers, "\n")
-
-	totalLines := m.Viewport.Height - 3 // Subtracting 3 for filename, empty line, and status bar
-
-	for i := 0; i < totalLines; i++ {
-		if i < len(lines) {
-			if i < len(numberLines) {
-				output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, numberLines[i])))
-			} else {
-				output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, "")))
-			}
-			output.WriteString(" " + lines[i])
-		} else {
-			output.WriteString(RenderLineNumber(fmt.Sprintf("%*s", lineNumberWidth, "~")))
-		}
-		output.WriteString("\n")
-	}
-
-	header := RenderHeader(fmt.Sprintf("File: %s", m.FilePath))
-	statusBar := m.renderStatusBar()
-
-	return fmt.Sprintf("%s\n%s\n%s", header, output.String(), statusBar)
-}
-
-func (m *UIModel) renderStatusBar() string {
-	unsavedIndicator := " "
-	if m.UnsavedChanges {
-		unsavedIndicator = "*"
-	}
-
-	leftStatus := fmt.Sprintf("%s%s", unsavedIndicator, m.FilePath)
-	rightStatus := "Press ESC for menu"
-
-	padding := strings.Repeat(" ", m.Viewport.Width-lipgloss.Width(leftStatus)-lipgloss.Width(rightStatus))
-
-	return lipgloss.JoinHorizontal(lipgloss.Left,
-		RenderStatusBar(leftStatus),
-		padding,
-		RenderStatusBar(rightStatus),
-	)
-}
-
 func (m *UIModel) saveFile() {
-	content := m.Editor.RenderDocumentWithoutLineNumbers()
-	err := os.WriteFile(m.FilePath, []byte(content), 0644)
+    if (m.Editor.Network.CurrentSession != "" && !m.Editor.Network.IsHost){
+        return
+    }
+
+	content := m.Editor.RenderDocumentWithoutLineNumbers() // Max fragen ob man Session auch abspeichern kann. Wie Snapshots
+	err := os.WriteFile(m.Editor.FilePath, []byte(content), 0644)
 	if err != nil {
 		fmt.Printf("Error saving file: %v\n", err)
 	} else {

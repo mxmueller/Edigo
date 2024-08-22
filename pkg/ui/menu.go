@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"edigo/pkg/network"
+
+    "strconv"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -49,12 +52,6 @@ func NewMenuModel() MenuModel {
 	}
 
 	joinItems := []list.Item{
-		MenuItem{title: "Session 1", desc: "IP: 192.168.1.100, Hash: abc123"},
-		MenuItem{title: "Session 2", desc: "IP: 192.168.1.101, Hash: def456"},
-		MenuItem{title: "Session 3", desc: "IP: 192.168.1.102, Hash: ghi789"},
-		MenuItem{title: "Back to Main Menu", desc: "Return to main menu"},
-		MenuItem{title: "Back to Editor", desc: "Return to the editor"},
-		MenuItem{title: "Quit", desc: "Exit the editor"},
 	}
 
 	createItems := []list.Item{
@@ -95,7 +92,12 @@ func (m MenuModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
+func (m MenuModel) Update(msg tea.Msg, network *network.Network) (MenuModel, tea.Cmd) {
+    m.setSessions(network)
+
+	var cmd tea.Cmd
+	*m.lists[m.current], cmd = m.lists[m.current].Update(msg)
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		for k := range m.lists {
@@ -107,9 +109,6 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 			return m.handleEnter()
 		}
 	}
-
-	var cmd tea.Cmd
-	*m.lists[m.current], cmd = m.lists[m.current].Update(msg)
 	return m, cmd
 }
 
@@ -150,4 +149,19 @@ func (m MenuModel) handleEnter() (MenuModel, tea.Cmd) {
 
 func (m MenuModel) View() string {
 	return m.lists[m.current].View()
+}
+
+func (m *MenuModel) setSessions(network *network.Network){
+    
+    sessionItems := []list.Item{}
+    
+    for name, session := range network.Sessions{
+        sessionItems = append(sessionItems, MenuItem{title: name, desc: "IP: " + session.IP + ":" + strconv.Itoa(session.Port)})
+    }
+
+    sessionItems = append(sessionItems, MenuItem{title: "Back to Main Menu", desc: "Return to main menu"})
+    sessionItems = append(sessionItems, MenuItem{title: "Back to Main Menu", desc: "Return to main menu"})
+    sessionItems = append(sessionItems, MenuItem{title: "Back to Editor", desc: "Return to the editor"})
+
+	m.lists["join"].SetItems(sessionItems)
 }
