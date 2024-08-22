@@ -15,7 +15,7 @@ import (
 )
 
 const (
-    broadcastAddr = "192.168.178.255"
+    broadcastAddr = ""
     broadcastMin = 12340
     broadcastMax = 12344
     tcpBasePort   = 12346
@@ -44,6 +44,12 @@ var (
 )
 
 func NewNetwork() *Network{
+
+    broadcastAddr, err := getBroadcastAddress()
+	if err != nil {
+		fmt.Println("Fehler:", err)
+        os.Exit(1)
+	}
     
     udpPort := 0
 
@@ -250,6 +256,40 @@ func SendInitRGA(rga crdt.RGA, conn net.Conn){
 
 func getRandomPort(min, max int) int {
 	return rand.Intn(max-min+1) + min
+}
+
+
+func getBroadcastAddress() (string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", fmt.Errorf("Fehler beim Abrufen der Netzwerkinterfaces: %v", err)
+	}
+
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok || ipnet.IP.To4() == nil {
+				continue
+			}
+
+			ip := ipnet.IP.To4()
+			mask := ipnet.Mask
+
+			broadcast := net.IP(make([]byte, 4))
+			for i := range ip {
+				broadcast[i] = ip[i] | ^mask[i]
+			}
+
+			return broadcast.String(), nil
+		}
+	}
+
+	return "", fmt.Errorf("Keine geeignete IPv4-Adresse gefunden")
 }
 
 func isLocalAddress(ipToCheck string) (bool, error) {
