@@ -2,8 +2,8 @@ package ui
 
 import (
 	"edigo/pkg/editor"
+	"edigo/pkg/theme"
 	"fmt"
-
 	"os"
 	"time"
 
@@ -21,17 +21,19 @@ type UIModel struct {
 	Menu           MenuModel
 	ShowMenu       bool
 	UnsavedChanges bool
-    updateEvent   chan struct{}
+	updateEvent    chan struct{}
+	Theme          *theme.Theme
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
-    update := make(chan struct{}, 1)
+	update := make(chan struct{}, 1)
 	siteID := generateSiteID()
-	editorInstance := editor.NewEditor(content, siteID)
+	theme := theme.NewTheme()
+	editorInstance := editor.NewEditor(content, siteID, theme)
 	vp := viewport.New(80, 24)
-    editorInstance.Viewport = &vp
-    editorInstance.Update = update
-    editorInstance.FilePath = filePath
+	editorInstance.Viewport = &vp
+	editorInstance.Update = update
+	editorInstance.FilePath = filePath
 
 	return &UIModel{
 		Editor:       editorInstance,
@@ -45,18 +47,19 @@ func NewUIModel(content string, filePath string) *UIModel {
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "menu"),
 		),
-		Menu:           NewMenuModel(),
+		Menu:           NewMenuModel(theme),
 		ShowMenu:       false,
 		UnsavedChanges: false,
-        updateEvent: update,
+		updateEvent:    update,
+		Theme:          theme,
 	}
 }
 
 func (m *UIModel) Init() tea.Cmd {
-    m.Viewport.SetContent(m.Editor.RenderContent())
-    	return tea.Batch(
-        tea.EnterAltScreen,
-		waitForActivity(m.updateEvent),   // wait for activity
+	m.Viewport.SetContent(m.Editor.RenderContent())
+	return tea.Batch(
+		tea.EnterAltScreen,
+		waitForActivity(m.updateEvent),
 	)
 }
 
@@ -92,7 +95,7 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Viewport.SetContent(m.Editor.RenderContent())
 	case editor.RemoteChange:
 		m.Viewport.SetContent(m.Editor.RenderContent())
-        return m, waitForActivity(m.updateEvent)
+		return m, waitForActivity(m.updateEvent)
 	}
 
 	return m, nil
@@ -125,42 +128,38 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ShowMenu = false
 		case QuitAction:
 			if m.UnsavedChanges {
-				// Here you might want to add a confirmation dialog
-				// For now, we'll just print a warning
 				fmt.Println("Warning: You have unsaved changes!")
 			}
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
-
 				m.ShowMenu = false
-                if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
-                    m.Editor.Error = "Already in a Session"
-		            m.Viewport.SetContent(m.Editor.RenderContent())
-                    break
-                }
+				if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
+					m.Editor.Error = "Already in a Session"
+					m.Viewport.SetContent(m.Editor.RenderContent())
+					break
+				}
 
-                go m.Editor.HandleConnections()
-                *m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data) // TODO implement Error handeling
-		        m.Viewport.SetContent(m.Editor.RenderContent())
+				go m.Editor.HandleConnections()
+				*m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data)
+				m.Viewport.SetContent(m.Editor.RenderContent())
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")
 
-            m.ShowMenu = false
-            if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
-                m.Editor.Error = "Already in a Session"
-                m.Viewport.SetContent(m.Editor.RenderContent())
-                break
-            }
-
-            go m.Editor.HandleConnections()
-            go m.Editor.Network.BroadcastSession(m.Editor.RGA)
 			m.ShowMenu = false
-		
-        case CreatePrivateSessionAction:
+			if m.Editor.Network.IsHost || m.Editor.Network.Host != nil {
+				m.Editor.Error = "Already in a Session"
+				m.Viewport.SetContent(m.Editor.RenderContent())
+				break
+			}
+
+			go m.Editor.HandleConnections()
+			go m.Editor.Network.BroadcastSession(m.Editor.RGA)
+			m.ShowMenu = false
+
+		case CreatePrivateSessionAction:
 			fmt.Println("Creating private session...")
-            // TODO
 			m.ShowMenu = false
 		case BackToEditorAction:
 			m.ShowMenu = false
@@ -173,17 +172,17 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *UIModel) View() string {
 	if m.ShowMenu {
-		return m.Menu.View()
+		return m.Theme.RenderMenuTitle("Menu") + "\n" + m.Menu.View()
 	}
 	return m.Viewport.View()
 }
 
 func (m *UIModel) saveFile() {
-    if (m.Editor.Network.CurrentSession != "" && !m.Editor.Network.IsHost){
-        return
-    }
+	if m.Editor.Network.CurrentSession != "" && !m.Editor.Network.IsHost {
+		return
+	}
 
-	content := m.Editor.RenderDocumentWithoutLineNumbers() // Max fragen ob man Session auch abspeichern kann. Wie Snapshots
+	content := m.Editor.RenderDocumentWithoutLineNumbers()
 	err := os.WriteFile(m.Editor.FilePath, []byte(content), 0644)
 	if err != nil {
 		fmt.Printf("Error saving file: %v\n", err)
