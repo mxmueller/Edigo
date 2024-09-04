@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 )
@@ -45,29 +46,35 @@ func NewEditor(content string, siteID string, theme *theme.Theme) *Editor {
 }
 
 func (e *Editor) InsertCharacter(ch rune) {
-	op := e.RGA.LocalInsert(ch)
-	e.sendToRemote(op)
+    op := e.RGA.LocalInsert(ch)
+    e.sendToRemote(op)
+    go e.sendToRemote(crdt.Operation{Type: crdt.Move, ID: e.RGA.Site, Character: 0, Position: e.RGA.CursorPosition})
 }
 
 func (e *Editor) DeleteCharacterBeforeCursor() {
-	op := e.RGA.LocalDelete()
-	e.sendToRemote(op)
+    op := e.RGA.LocalDelete()
+    e.sendToRemote(op)
+    go e.sendToRemote(crdt.Operation{Type: crdt.Move, ID: e.RGA.Site, Character: 0, Position: e.RGA.CursorPosition})
 }
 
 func (e *Editor) MoveCursorLeft() {
-	e.RGA.MoveCursorLeft()
+    op := e.RGA.MoveCursorLeft()
+    e.sendToRemote(op)
 }
 
 func (e *Editor) MoveCursorRight() {
-	e.RGA.MoveCursorRight()
+    op := e.RGA.MoveCursorRight()
+    e.sendToRemote(op)
 }
 
 func (e *Editor) MoveCursorUp() {
-	e.RGA.MoveCursorUp()
+	op := e.RGA.MoveCursorUp()
+    e.sendToRemote(op)
 }
 
 func (e *Editor) MoveCursorDown() {
-	e.RGA.MoveCursorDown()
+    op := e.RGA.MoveCursorDown()
+    e.sendToRemote(op)
 }
 
 func (e *Editor) sendToRemote(op crdt.Operation) {
@@ -89,55 +96,80 @@ func (e *Editor) HandleConnections() {
 }
 
 func (e *Editor) reciveInput(conn net.Conn) {
-	defer conn.Close()
-	for {
-		buf := make([]byte, 2064)
-		_, err := conn.Read(buf)
-		if err != nil {
-			if e.Network.IsHost {
-				e.Network.RemoveClient(conn)
-			}
-			if e.Network.Host != nil {
-				e.Network.HostClosedSession()
-			}
-			e.Update <- struct{}{}
-			return
-		}
-		tmpbuff := bytes.NewBuffer(buf)
-		incomingOp := new(crdt.Operation)
+    defer conn.Close()
+            // Empfange Nachrichten und gib sie aus
+        for {
+            buf := make([]byte, 256)
 
-		gobobj := gob.NewDecoder(tmpbuff)
-		gobobj.Decode(incomingOp)
-		e.RGA.ApplyOperation(*incomingOp)
-		e.Update <- struct{}{}
+            network.ReadM.Lock()
+            conn.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+            _, err := conn.Read(buf)
+            network.ReadM.Unlock()
 
-		if e.Network.IsHost {
-			for _, sendConn := range e.Network.Clients {
-				if sendConn == conn {
-					continue
-				}
-				e.Network.SendOperation(*incomingOp, sendConn)
-			}
-		}
-	}
+            if err != nil { // TODO make error msg check
+
+                if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+                    continue
+                }
+
+                if e.Network.IsHost{
+                    // client hat Verbindung geschlossen
+                    e.Network.RemoveClient(conn)
+                }
+                if e.Network.Host != nil {
+                    e.Network.HostClosedSession()
+                // falls man will sollte man hier den alten Content wieder reinladen
+            }
+                e.Update<- struct{}{}
+                return
+            }
+            tmpbuff := bytes.NewBuffer(buf)
+            incomingOp := new(crdt.Operation)
+
+            gobobj := gob.NewDecoder(tmpbuff)
+            gobobj.Decode(incomingOp)
+            e.RGA.ApplyOperation(*incomingOp)
+            e.Update <- struct{}{}
+
+            if e.Network.IsHost{ // forward to other editor
+                for _, sendConn := range e.Network.Clients{
+                    if sendConn == conn{
+                        continue
+                    } 
+                    e.Network.SendOperation(*incomingOp, sendConn)
+                }
+        }
+    }
 }
 
+
 func (e *Editor) RenderDocument() string {
+    crdt.InsertM.Lock()
 	var result strings.Builder
 	content := e.RGA.GetText()
 
 	for i, ch := range content {
 		if i == e.RGA.CursorPosition {
-			result.WriteString(e.Theme.RenderCursor(string(ch)))
-		} else {
-			result.WriteRune(ch)
+		    result.WriteString(e.Theme.RenderCursor(" "))
 		}
+        for _, j := range e.RGA.RemoteCursors{
+		    if i == j {
+		    result.WriteString(e.Theme.RenderCursor(" "))
+            }
+        }
+		result.WriteRune(ch)
 	}
 
 	if e.RGA.CursorPosition == len(content) {
 		result.WriteString(e.Theme.RenderCursor(" "))
 	}
+    for _, j := range e.RGA.RemoteCursors{
+        if len(content) == j {
+		result.WriteString(e.Theme.RenderCursor(" "))
+        }
+    }
 
+    crdt.InsertM.Unlock()
 	return result.String()
 }
 

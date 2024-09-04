@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand" // Import für die Zufallszahlengenerierung
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,11 @@ type OperationType int
 const (
 	Insert OperationType = iota
 	Delete
+    Move
+)
+
+var (
+	InsertM sync.Mutex
 )
 
 type Element struct {
@@ -32,6 +38,7 @@ type RGA struct {
 	Site           string
 	Clock          int
 	CursorPosition int
+    RemoteCursors map[string]int
 }
 
 func NewRGA(site string) *RGA {
@@ -40,6 +47,7 @@ func NewRGA(site string) *RGA {
 		Site:           site,
 		Clock:          0,
 		CursorPosition: 0,
+        RemoteCursors: make(map[string]int),
 	}
 }
 
@@ -60,14 +68,14 @@ func (rga *RGA) LocalInsert(char rune) Operation {
 	}
 
 	op := Operation{Type: Insert, ID: id, Character: char, Position: rga.CursorPosition}
-	rga.CursorPosition++
+    rga.MoveCursorRight()
 
 	return op
 }
 
 func (rga *RGA) LocalDelete() Operation {
 	if rga.CursorPosition > 0 {
-		rga.CursorPosition--
+        rga.MoveCursorLeft()
 		rga.Elements[rga.CursorPosition].Tombstone = true
 		op := Operation{Type: Delete, ID: rga.Elements[rga.CursorPosition].ID, Position: rga.CursorPosition}
 
@@ -96,13 +104,21 @@ func (rga *RGA) RemoteDelete(op Operation) {
 	}
 }
 
+func (rga *RGA) SetRemoteCursor(op Operation) {
+    rga.RemoteCursors[op.ID] = op.Position
+}
+
 func (rga *RGA) ApplyOperation(op Operation) {
+    InsertM.Lock()
 	switch op.Type {
 	case Insert:
 		rga.RemoteInsert(op)
 	case Delete:
 		rga.RemoteDelete(op)
+	case Move:
+        rga.SetRemoteCursor(op)
 	}
+    InsertM.Unlock()
 }
 
 func (rga *RGA) GetText() string {
@@ -110,57 +126,73 @@ func (rga *RGA) GetText() string {
 	for _, elem := range rga.Elements {
 		if !elem.Tombstone {
 			result.WriteRune(elem.Character)
-		}
+		} else{
+			result.WriteRune(rune(0))
+        }
 	}
 	return result.String()
 }
 
-func (rga *RGA) MoveCursorLeft() {
-	if rga.CursorPosition > 0 {
+func (rga *RGA) MoveCursorLeft() Operation{
+	for rga.CursorPosition > 0 {
 		rga.CursorPosition--
+		if !rga.Elements[rga.CursorPosition].Tombstone {
+			break
+		}
 	}
+    return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
-func (rga *RGA) MoveCursorRight() {
-	if rga.CursorPosition < len(rga.Elements) {
+func (rga *RGA) MoveCursorRight() Operation{
+	for rga.CursorPosition < len(rga.Elements) {
 		rga.CursorPosition++
+        if rga.CursorPosition >= len(rga.Elements) {
+            return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
+        }
+		if !rga.Elements[rga.CursorPosition].Tombstone {
+			break
+		}
 	}
+    return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
-func (rga *RGA) MoveCursorUp() {
-	if rga.CursorPosition == 0 {
-		return
+func (rga *RGA) MoveCursorUp() Operation {
+    if rga.CursorPosition == 0 {
+		return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
+
 	}
 
 	for rga.CursorPosition > 0 {
-		rga.CursorPosition--
+        rga.MoveCursorLeft()
 		if rga.Elements[rga.CursorPosition].Character == '\n' {
 			break
 		}
 	}
 
 	for rga.CursorPosition > 0 {
-		rga.CursorPosition--
+        rga.MoveCursorLeft()
 		if rga.Elements[rga.CursorPosition].Character == '\n' {
-			rga.CursorPosition++
+            rga.MoveCursorRight()
 			break
 		}
 	}
+	return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
 // map cursor
-func (rga *RGA) MoveCursorDown() {
+func (rga *RGA) MoveCursorDown() Operation {
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
-		rga.CursorPosition++
+            rga.MoveCursorRight()
 	}
 
 	if rga.CursorPosition < len(rga.Elements) {
-		rga.CursorPosition++
+            rga.MoveCursorRight()
 	}
 
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
-		rga.CursorPosition++
+            rga.MoveCursorRight()
 	}
+	return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
 func init() {

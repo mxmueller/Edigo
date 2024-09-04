@@ -40,6 +40,7 @@ type Session struct {
 
 var (
 	sessionMutex sync.Mutex
+	ReadM sync.Mutex
 	Connections  []net.Conn // active connections
 	Quit         = make(chan bool)
 )
@@ -170,6 +171,7 @@ func (network *Network) BroadcastSession(rga *crdt.RGA) {
 						continue
 					}
 
+                    ReadM.Lock()
 					conn, err := net.DialUDP("udp", nil, addr)
 					if err != nil {
 						fmt.Printf("Fehler beim Öffnen der UDP-Verbindung für Port %d: %v\n", udpPort, err)
@@ -180,6 +182,7 @@ func (network *Network) BroadcastSession(rga *crdt.RGA) {
 					if err != nil {
 						fmt.Printf("Fehler beim Senden der Broadcast-Nachricht an Port %d: %v\n", udpPort, err)
 					}
+                    ReadM.Unlock()
 				}
 				time.Sleep(3 * time.Second)
 			}
@@ -200,6 +203,7 @@ func (network *Network) BroadcastSession(rga *crdt.RGA) {
 			network.NewConnection <- conn
 			network.IsHost = true
 			SendInitRGA(*rga, conn)
+            return
 		}
 	}
 }
@@ -296,7 +300,9 @@ func SendInitRGA(rga crdt.RGA, conn net.Conn) {
 		fmt.Printf("Fehler beim Kodieren der initialen RGA: %v\n", err)
 		return
 	}
+    ReadM.Lock()
 	_, err = conn.Write(bin_buf.Bytes())
+    ReadM.Unlock()
 	if err != nil {
 		fmt.Printf("Fehler beim Senden der initialen RGA: %v\n", err)
 	}
