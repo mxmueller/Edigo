@@ -93,6 +93,9 @@ func (rga *RGA) RemoteInsert(op Operation) {
 		rga.Elements = append(rga.Elements[:op.Position+1], rga.Elements[op.Position:]...)
 		rga.Elements[op.Position] = newElement
 	}
+    if op.Position < rga.CursorPosition {
+        rga.MoveCursorRight()
+    }
 }
 
 func (rga *RGA) RemoteDelete(op Operation) {
@@ -133,33 +136,30 @@ func (rga *RGA) GetText() string {
 	return result.String()
 }
 
-func (rga *RGA) MoveCursorLeft() Operation{
+func (rga *RGA) MoveCursorLeft() {
 	for rga.CursorPosition > 0 {
 		rga.CursorPosition--
 		if !rga.Elements[rga.CursorPosition].Tombstone {
 			break
 		}
 	}
-    return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
-func (rga *RGA) MoveCursorRight() Operation{
+func (rga *RGA) MoveCursorRight() {
 	for rga.CursorPosition < len(rga.Elements) {
 		rga.CursorPosition++
         if rga.CursorPosition >= len(rga.Elements) {
-            return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
+            return
         }
 		if !rga.Elements[rga.CursorPosition].Tombstone {
 			break
 		}
 	}
-    return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
-func (rga *RGA) MoveCursorUp() Operation {
+func (rga *RGA) MoveCursorUp() {
     if rga.CursorPosition == 0 {
-		return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
-
+        return
 	}
 
 	for rga.CursorPosition > 0 {
@@ -176,11 +176,10 @@ func (rga *RGA) MoveCursorUp() Operation {
 			break
 		}
 	}
-	return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
 // map cursor
-func (rga *RGA) MoveCursorDown() Operation {
+func (rga *RGA) MoveCursorDown() {
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
             rga.MoveCursorRight()
 	}
@@ -192,7 +191,6 @@ func (rga *RGA) MoveCursorDown() Operation {
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
             rga.MoveCursorRight()
 	}
-	return Operation{Type: Move, ID: rga.Site, Character: 0, Position: rga.CursorPosition}
 }
 
 func init() {

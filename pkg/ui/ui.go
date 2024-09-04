@@ -143,6 +143,7 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				go m.Editor.HandleConnections()
 				*m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data)
 				m.Viewport.SetContent(m.Editor.RenderContent())
+                m.Editor.SendCursorUpdate()
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")

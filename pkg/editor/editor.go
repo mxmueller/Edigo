@@ -48,33 +48,37 @@ func NewEditor(content string, siteID string, theme *theme.Theme) *Editor {
 func (e *Editor) InsertCharacter(ch rune) {
     op := e.RGA.LocalInsert(ch)
     e.sendToRemote(op)
-    go e.sendToRemote(crdt.Operation{Type: crdt.Move, ID: e.RGA.Site, Character: 0, Position: e.RGA.CursorPosition})
+    e.SendCursorUpdate()
 }
 
 func (e *Editor) DeleteCharacterBeforeCursor() {
     op := e.RGA.LocalDelete()
     e.sendToRemote(op)
-    go e.sendToRemote(crdt.Operation{Type: crdt.Move, ID: e.RGA.Site, Character: 0, Position: e.RGA.CursorPosition})
+    e.SendCursorUpdate()
 }
 
 func (e *Editor) MoveCursorLeft() {
-    op := e.RGA.MoveCursorLeft()
-    e.sendToRemote(op)
+    e.RGA.MoveCursorLeft()
+    e.SendCursorUpdate()
 }
 
 func (e *Editor) MoveCursorRight() {
-    op := e.RGA.MoveCursorRight()
-    e.sendToRemote(op)
+    e.RGA.MoveCursorRight()
+    e.SendCursorUpdate()
 }
 
 func (e *Editor) MoveCursorUp() {
-	op := e.RGA.MoveCursorUp()
-    e.sendToRemote(op)
+	e.RGA.MoveCursorUp()
+    e.SendCursorUpdate()
 }
 
 func (e *Editor) MoveCursorDown() {
-    op := e.RGA.MoveCursorDown()
-    e.sendToRemote(op)
+    e.RGA.MoveCursorDown()
+    e.SendCursorUpdate()
+}
+
+func (e *Editor) SendCursorUpdate() {
+    go e.sendToRemote(crdt.Operation{Type: crdt.Move, ID: e.Network.ID, Character: 0, Position: e.RGA.CursorPosition})
 }
 
 func (e *Editor) sendToRemote(op crdt.Operation) {
@@ -101,10 +105,8 @@ func (e *Editor) reciveInput(conn net.Conn) {
         for {
             buf := make([]byte, 256)
 
-            network.ReadM.Lock()
             conn.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
             _, err := conn.Read(buf)
-            network.ReadM.Unlock()
 
             if err != nil { // TODO make error msg check
 
@@ -129,6 +131,11 @@ func (e *Editor) reciveInput(conn net.Conn) {
             gobobj := gob.NewDecoder(tmpbuff)
             gobobj.Decode(incomingOp)
             e.RGA.ApplyOperation(*incomingOp)
+            
+            if incomingOp.Type != crdt.Move {
+                e.SendCursorUpdate()
+            }
+
             e.Update <- struct{}{}
 
             if e.Network.IsHost{ // forward to other editor
