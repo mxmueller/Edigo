@@ -7,13 +7,13 @@ import (
 	"edigo/pkg/theme"
 	"encoding/gob"
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type RemoteChange struct{}
@@ -325,31 +325,35 @@ func (e *Editor) RenderDocumentWithoutLineNumbers() string {
 }
 
 func (e *Editor) RenderContent() string {
-	lineNumbers := e.GetLineNumbers()
-	document := e.RenderDocument()
-
-	lineNumberWidth := len(fmt.Sprintf("%d", strings.Count(document, "\n")+1))
+	crdt.InsertM.Lock()
+	defer crdt.InsertM.Unlock()
 
 	var output strings.Builder
+	content := e.RGA.GetText()
+	lines := strings.Split(content, "\n")
 
-	lines := strings.Split(document, "\n")
-	numberLines := strings.Split(lineNumbers, "\n")
+	lineNumberWidth := len(fmt.Sprintf("%d", len(lines)))
 
 	totalLines := e.Viewport.Height - 2 // Subtracting 2 for header and footer
 
 	for i := 0; i < totalLines; i++ {
-		if i < len(lines) {
-			lineNumber := ""
-			if i < len(numberLines) {
-				lineNumber = e.Theme.RenderLineNumber(numberLines[i], lineNumberWidth)
-			} else {
-				lineNumber = e.Theme.RenderLineNumber("", lineNumberWidth)
-			}
+		lineNumber := ""
+		line := ""
 
-			line := e.Theme.BaseStyle.Render(lines[i])
-			output.WriteString(lineNumber + line + "\n")
+		if i < len(lines) {
+			lineNumber = fmt.Sprintf("%*d", lineNumberWidth, i+1)
+			line = lines[i]
 		} else {
-			output.WriteString(e.Theme.RenderLineNumber("~", lineNumberWidth) + "\n")
+			lineNumber = strings.Repeat(" ", lineNumberWidth-1) + "~"
+		}
+
+		renderedLineNumber := e.Theme.RenderLineNumber(lineNumber, lineNumberWidth)
+
+		if i < len(lines) {
+			renderedLine := e.renderLineWithCursors(line, i)
+			output.WriteString(renderedLineNumber + renderedLine + "\n")
+		} else {
+			output.WriteString(renderedLineNumber + "\n")
 		}
 	}
 
@@ -368,9 +372,56 @@ func (e *Editor) RenderContent() string {
 
 	e.Error = ""
 
-	content := fmt.Sprintf("%s\n%s%s", header, output.String(), footer)
+	content = fmt.Sprintf("%s\n%s%s", header, output.String(), footer)
 
 	return lipgloss.NewStyle().MaxWidth(e.Viewport.Width).MaxHeight(e.Viewport.Height).Render(content)
+}
+
+func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
+	var result strings.Builder
+	lineStartIndex := e.getLineStartIndex(lineIndex)
+
+	for colIndex, ch := range line {
+		absoluteIndex := lineStartIndex + colIndex
+
+		if absoluteIndex == e.LocalCursor.Position {
+			result.WriteString(e.renderCursorWithName(e.LocalCursor))
+		}
+
+		e.remoteCursorMu.RLock()
+		for _, remoteCursor := range e.RemoteCursors {
+			if absoluteIndex == remoteCursor.Position {
+				result.WriteString(e.renderCursorWithName(remoteCursor))
+			}
+		}
+		e.remoteCursorMu.RUnlock()
+
+		result.WriteRune(ch)
+	}
+
+	// Check for cursors at the end of the line
+	if lineStartIndex+len(line) == e.LocalCursor.Position {
+		result.WriteString(e.renderCursorWithName(e.LocalCursor))
+	}
+
+	e.remoteCursorMu.RLock()
+	for _, remoteCursor := range e.RemoteCursors {
+		if lineStartIndex+len(line) == remoteCursor.Position {
+			result.WriteString(e.renderCursorWithName(remoteCursor))
+		}
+	}
+	e.remoteCursorMu.RUnlock()
+
+	return result.String()
+}
+func (e *Editor) getLineStartIndex(lineIndex int) int {
+	content := e.RGA.GetText()
+	lines := strings.Split(content, "\n")
+	startIndex := 0
+	for i := 0; i < lineIndex; i++ {
+		startIndex += len(lines[i]) + 1 // +1 for the newline character
+	}
+	return startIndex
 }
 
 func (e *Editor) getCursorLineAndColumn() (int, int) {

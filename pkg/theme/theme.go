@@ -15,6 +15,7 @@ type UserTheme struct {
 type Theme struct {
 	BaseStyle             lipgloss.Style
 	HeaderStyle           lipgloss.Style
+	FooterStyle           lipgloss.Style
 	LineNumberStyle       lipgloss.Style
 	CursorStyle           lipgloss.Style
 	MenuTitleStyle        lipgloss.Style
@@ -22,7 +23,7 @@ type Theme struct {
 	MenuSelectedItemStyle lipgloss.Style
 	StatusBarStyle        lipgloss.Style
 	UsernameStyle         lipgloss.Style
-	ErrorStyle            lipgloss.Style // Neue Stil-Definition für Fehler
+	ErrorStyle            lipgloss.Style
 	LineNumberPadding     int
 	UserThemes            []UserTheme
 }
@@ -33,7 +34,7 @@ func NewTheme() *Theme {
 	accentColor := lipgloss.Color("#C68FE6")
 	textColor := lipgloss.Color("#FFFFFF")
 	mutedTextColor := lipgloss.Color("#4B5563")
-	errorColor := lipgloss.Color("#FF0000") // Rote Farbe für Fehler
+	errorColor := lipgloss.Color("#FF0000")
 
 	baseStyle := lipgloss.NewStyle().Foreground(textColor)
 
@@ -56,8 +57,15 @@ func NewTheme() *Theme {
 			Foreground(primaryColor).
 			Bold(true).
 			Padding(0, 1).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(secondaryColor),
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(secondaryColor).
+			BorderBottom(true),
+		FooterStyle: baseStyle.Copy().
+			Foreground(mutedTextColor).
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(secondaryColor).
+			BorderTop(true),
 		LineNumberStyle: baseStyle.Copy().
 			Foreground(mutedTextColor).
 			Width(4).
@@ -106,6 +114,10 @@ func (t *Theme) RenderCursor(isSharedSession bool, themeIndex int) string {
 
 func (t *Theme) RenderHeader(content string) string {
 	return t.HeaderStyle.Render(content)
+}
+
+func (t *Theme) RenderFooter(content string) string {
+	return t.FooterStyle.Render(content)
 }
 
 func (t *Theme) RenderMenuTitle(title string) string {

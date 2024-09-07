@@ -86,7 +86,9 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.Viewport.Width = msg.Width
-		m.Viewport.Height = msg.Height
+		m.Viewport.Height = msg.Height - 2 // Reserve space for header and footer
+		m.Editor.Viewport.Width = msg.Width
+		m.Editor.Viewport.Height = msg.Height - 2
 		for k := range m.Menu.lists {
 			m.Menu.lists[k].SetWidth(msg.Width)
 			m.Menu.lists[k].SetHeight(msg.Height)
@@ -179,11 +181,22 @@ func (m *UIModel) View() string {
 	if m.ShowMenu {
 		return m.Theme.RenderMenuTitle("Menu") + "\n" + m.Menu.View()
 	}
-	content := m.Viewport.View()
-	if m.ErrorMsg != "" {
-		content += "\n" + m.Theme.RenderError(m.ErrorMsg)
+
+	headerContent := m.Editor.FilePath
+	if m.UnsavedChanges {
+		headerContent += " [Unsaved Changes]"
 	}
-	return content
+	header := m.Theme.RenderHeader(headerContent)
+
+	content := m.Viewport.View()
+
+	footerContent := "Press ESC for menu"
+	if m.ErrorMsg != "" {
+		footerContent = m.Theme.RenderError(m.ErrorMsg)
+	}
+	footer := m.Theme.RenderFooter(footerContent)
+
+	return header + "\n" + content + "\n" + footer
 }
 
 func (m *UIModel) saveFile() {
@@ -194,10 +207,12 @@ func (m *UIModel) saveFile() {
 	content := m.Editor.RenderDocumentWithoutLineNumbers()
 	err := os.WriteFile(m.Editor.FilePath, []byte(content), 0644)
 	if err != nil {
-		fmt.Printf("Error saving file: %v\n", err)
+		m.ErrorMsg = fmt.Sprintf("Error saving file: %v", err)
 	} else {
 		m.UnsavedChanges = false
+		m.ErrorMsg = "File saved successfully"
 	}
+	m.Viewport.SetContent(m.Editor.RenderContent())
 }
 
 func generateSiteID() string {
