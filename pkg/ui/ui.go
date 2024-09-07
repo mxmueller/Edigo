@@ -21,18 +21,15 @@ type UIModel struct {
 	Menu           MenuModel
 	ShowMenu       bool
 	UnsavedChanges bool
-	updateEvent    chan struct{}
 	Theme          *theme.Theme
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
-	update := make(chan struct{}, 1)
 	siteID := generateSiteID()
 	theme := theme.NewTheme()
 	editorInstance := editor.NewEditor(content, siteID, theme)
 	vp := viewport.New(80, 24)
-	editorInstance.Viewport = &vp
-	editorInstance.Update = update
+	editorInstance.Viewport = vp
 	editorInstance.FilePath = filePath
 
 	return &UIModel{
@@ -50,7 +47,6 @@ func NewUIModel(content string, filePath string) *UIModel {
 		Menu:           NewMenuModel(theme),
 		ShowMenu:       false,
 		UnsavedChanges: false,
-		updateEvent:    update,
 		Theme:          theme,
 	}
 }
@@ -59,7 +55,7 @@ func (m *UIModel) Init() tea.Cmd {
 	m.Viewport.SetContent(m.Editor.RenderContent())
 	return tea.Batch(
 		tea.EnterAltScreen,
-		waitForActivity(m.updateEvent),
+		waitForActivity(m.Editor.Update),
 	)
 }
 
@@ -67,7 +63,9 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.ShowMenu {
 		return m.updateMenu(msg)
 	}
-	m.Viewport.SetContent(m.Editor.RenderContent())
+
+	var cmd tea.Cmd
+	m.Viewport, cmd = m.Viewport.Update(msg)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -82,7 +80,6 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.InputHandler.HandleKeyMsg(msg)
 			m.UnsavedChanges = true
-			m.Viewport.SetContent(m.Editor.RenderContent())
 		}
 
 	case tea.WindowSizeMsg:
@@ -92,13 +89,13 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Menu.lists[k].SetWidth(msg.Width)
 			m.Menu.lists[k].SetHeight(msg.Height)
 		}
-		m.Viewport.SetContent(m.Editor.RenderContent())
+
 	case editor.RemoteChange:
-		m.Viewport.SetContent(m.Editor.RenderContent())
-		return m, waitForActivity(m.updateEvent)
+		// Do nothing special, just update the content
 	}
 
-	return m, nil
+	m.Viewport.SetContent(m.Editor.RenderContent())
+	return m, tea.Batch(cmd, waitForActivity(m.Editor.Update))
 }
 
 func waitForActivity(sub chan struct{}) tea.Cmd {
@@ -130,6 +127,7 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.UnsavedChanges {
 				fmt.Println("Warning: You have unsaved changes!")
 			}
+			m.Editor.Stop() // Stoppen Sie den Ticker, bevor Sie das Programm beenden
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
@@ -143,6 +141,7 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				go m.Editor.HandleConnections()
 				*m.Editor.RGA = m.Editor.Network.JoinSession(msg.Data)
 				m.Viewport.SetContent(m.Editor.RenderContent())
+				m.Editor.SendCursorUpdate()
 			}
 		case CreatePublicSessionAction:
 			fmt.Println("Creating public session...")

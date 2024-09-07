@@ -24,6 +24,7 @@ const (
 
 type Network struct {
 	IsHost         bool
+    ID             string
 	Host           net.Conn           // isHost = false
 	Clients        []net.Conn         // isHost = true
 	Sessions       map[string]Session // found connections
@@ -83,7 +84,7 @@ func NewNetwork() *Network {
 		os.Exit(1)
 	}
 
-	return &Network{IsHost: false, Sessions: make(map[string]Session), UdpPort: udpPort, CurrentSession: "", NewConnection: make(chan net.Conn)}
+    return &Network{IsHost: false, ID: generateNetworkID(), Sessions: make(map[string]Session), UdpPort: udpPort, CurrentSession: "", NewConnection: make(chan net.Conn)}
 }
 
 func (network *Network) ListenForBroadcasts() {
@@ -176,7 +177,6 @@ func (network *Network) BroadcastSession(rga *crdt.RGA) {
 						continue
 					}
 					_, err = conn.Write(message)
-					conn.Close()
 					if err != nil {
 						fmt.Printf("Fehler beim Senden der Broadcast-Nachricht an Port %d: %v\n", udpPort, err)
 					}
@@ -370,4 +370,7 @@ func isLocalAddress(ipToCheck string) (bool, error) {
 	}
 
 	return false, nil
+}
+func generateNetworkID() string {
+	return fmt.Sprintf("network-%d", time.Now().UnixNano())
 }
