@@ -22,6 +22,7 @@ type Theme struct {
 	MenuSelectedItemStyle lipgloss.Style
 	StatusBarStyle        lipgloss.Style
 	UsernameStyle         lipgloss.Style
+	ErrorStyle            lipgloss.Style // Neue Stil-Definition für Fehler
 	LineNumberPadding     int
 	UserThemes            []UserTheme
 }
@@ -32,6 +33,7 @@ func NewTheme() *Theme {
 	accentColor := lipgloss.Color("#C68FE6")
 	textColor := lipgloss.Color("#FFFFFF")
 	mutedTextColor := lipgloss.Color("#4B5563")
+	errorColor := lipgloss.Color("#FF0000") // Rote Farbe für Fehler
 
 	baseStyle := lipgloss.NewStyle().Foreground(textColor)
 
@@ -80,6 +82,9 @@ func NewTheme() *Theme {
 			Background(lipgloss.Color("#333333")).
 			Padding(0, 1).
 			Bold(true),
+		ErrorStyle: baseStyle.Copy().
+			Foreground(errorColor).
+			Bold(true),
 		LineNumberPadding: 2,
 		UserThemes:        userThemes,
 	}
@@ -124,4 +129,8 @@ func (t *Theme) RenderUsername(username string, themeIndex int) string {
 		Foreground(userTheme.DarkerColor).
 		Background(userTheme.LighterColor)
 	return style.Render(username)
+}
+
+func (t *Theme) RenderError(content string) string {
+	return t.ErrorStyle.Render(content)
 }

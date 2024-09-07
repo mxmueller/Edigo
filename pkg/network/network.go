@@ -3,8 +3,10 @@ package network
 import (
 	"bytes"
 	"edigo/pkg/crdt"
+	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -24,7 +26,7 @@ const (
 
 type Network struct {
 	IsHost         bool
-    ID             string
+	ID             string
 	Host           net.Conn           // isHost = false
 	Clients        []net.Conn         // isHost = true
 	Sessions       map[string]Session // found connections
@@ -84,7 +86,8 @@ func NewNetwork() *Network {
 		os.Exit(1)
 	}
 
-    return &Network{IsHost: false, ID: generateNetworkID(), Sessions: make(map[string]Session), UdpPort: udpPort, CurrentSession: "", NewConnection: make(chan net.Conn)}
+	network := &Network{IsHost: false, ID: generateNetworkID(), Sessions: make(map[string]Session), UdpPort: udpPort, CurrentSession: "", NewConnection: make(chan net.Conn)}
+	return network
 }
 
 func (network *Network) ListenForBroadcasts() {
@@ -108,6 +111,7 @@ func (network *Network) ListenForBroadcasts() {
 			fmt.Printf("Fehler beim Lesen der UDP-Nachricht: %v\n", err)
 			continue
 		}
+
 		isLocalAddr, err := isLocalAddress(remoteAddr.IP.String())
 		if err != nil {
 			fmt.Printf("Fehler beim Überprüfen der lokalen Adresse: %v\n", err)
@@ -220,17 +224,25 @@ func (network *Network) JoinSession(sessionName string) crdt.RGA {
 		return crdt.RGA{}
 	}
 
-	tmp := make([]byte, 2024)
-	_, err = conn.Read(tmp)
+	// First read the size of the incoming data
+	var size int64
+	err = binary.Read(conn, binary.BigEndian, &size)
+	if err != nil {
+		conn.Close()
+		return crdt.RGA{}
+	}
+
+	// Now read the exact amount of data
+	tmp := make([]byte, size)
+	_, err = io.ReadFull(conn, tmp)
 	if err != nil {
 		fmt.Printf("Fehler beim Lesen der Initialdaten: %v\n", err)
 		conn.Close()
 		return crdt.RGA{}
 	}
+
 	tmpbuff := bytes.NewBuffer(tmp)
-
 	tmpstruct := new(crdt.RGA)
-
 	gobobj := gob.NewDecoder(tmpbuff)
 
 	err = gobobj.Decode(tmpstruct)
@@ -244,6 +256,11 @@ func (network *Network) JoinSession(sessionName string) crdt.RGA {
 	network.NewConnection <- conn
 	network.IsHost = false
 	network.CurrentSession = session.Name
+
+	// Verify the integrity of the received RGA
+	if !tmpstruct.VerifyIntegrity() {
+		return crdt.RGA{}
+	}
 
 	return *tmpstruct
 }
@@ -296,6 +313,15 @@ func SendInitRGA(rga crdt.RGA, conn net.Conn) {
 		fmt.Printf("Fehler beim Kodieren der initialen RGA: %v\n", err)
 		return
 	}
+
+	// Send the size of the data first
+	size := int64(bin_buf.Len())
+	err = binary.Write(conn, binary.BigEndian, size)
+	if err != nil {
+		return
+	}
+
+	// Then send the actual data
 	_, err = conn.Write(bin_buf.Bytes())
 	if err != nil {
 		fmt.Printf("Fehler beim Senden der initialen RGA: %v\n", err)
@@ -371,6 +397,7 @@ func isLocalAddress(ipToCheck string) (bool, error) {
 
 	return false, nil
 }
+
 func generateNetworkID() string {
 	return fmt.Sprintf("network-%d", time.Now().UnixNano())
 }

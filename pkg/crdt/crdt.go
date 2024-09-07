@@ -2,7 +2,8 @@ package crdt
 
 import (
 	"fmt"
-	"math/rand" // Import für die Zufallszahlengenerierung
+	"hash/crc32"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +14,7 @@ type OperationType int
 const (
 	Insert OperationType = iota
 	Delete
-    Move
+	Move
 )
 
 var (
@@ -38,17 +39,20 @@ type RGA struct {
 	Site           string
 	Clock          int
 	CursorPosition int
-    RemoteCursors map[string]int
+	RemoteCursors  map[string]int
+	Checksum       uint32 // New field for data integrity check
 }
 
 func NewRGA(site string) *RGA {
-	return &RGA{
+	rga := &RGA{
 		Elements:       []Element{},
 		Site:           site,
 		Clock:          0,
 		CursorPosition: 0,
-        RemoteCursors: make(map[string]int),
+		RemoteCursors:  make(map[string]int),
 	}
+	rga.updateChecksum()
+	return rga
 }
 
 func (rga *RGA) generateID() string {
@@ -68,17 +72,19 @@ func (rga *RGA) LocalInsert(char rune) Operation {
 	}
 
 	op := Operation{Type: Insert, ID: id, Character: char, Position: rga.CursorPosition}
-    rga.MoveCursorRight()
+	rga.MoveCursorRight()
 
+	rga.updateChecksum()
 	return op
 }
 
 func (rga *RGA) LocalDelete() Operation {
 	if rga.CursorPosition > 0 {
-        rga.MoveCursorLeft()
+		rga.MoveCursorLeft()
 		rga.Elements[rga.CursorPosition].Tombstone = true
 		op := Operation{Type: Delete, ID: rga.Elements[rga.CursorPosition].ID, Position: rga.CursorPosition}
 
+		rga.updateChecksum()
 		return op
 	}
 	return Operation{}
@@ -93,9 +99,9 @@ func (rga *RGA) RemoteInsert(op Operation) {
 		rga.Elements = append(rga.Elements[:op.Position+1], rga.Elements[op.Position:]...)
 		rga.Elements[op.Position] = newElement
 	}
-    if op.Position < rga.CursorPosition {
-        rga.MoveCursorRight()
-    }
+	if op.Position < rga.CursorPosition {
+		rga.MoveCursorRight()
+	}
 }
 
 func (rga *RGA) RemoteDelete(op Operation) {
@@ -108,20 +114,23 @@ func (rga *RGA) RemoteDelete(op Operation) {
 }
 
 func (rga *RGA) SetRemoteCursor(op Operation) {
-    rga.RemoteCursors[op.ID] = op.Position
+	rga.RemoteCursors[op.ID] = op.Position
 }
 
 func (rga *RGA) ApplyOperation(op Operation) {
-    InsertM.Lock()
+	InsertM.Lock()
+	defer InsertM.Unlock()
+
 	switch op.Type {
 	case Insert:
 		rga.RemoteInsert(op)
 	case Delete:
 		rga.RemoteDelete(op)
 	case Move:
-        rga.SetRemoteCursor(op)
+		rga.SetRemoteCursor(op)
 	}
-    InsertM.Unlock()
+
+	rga.updateChecksum()
 }
 
 func (rga *RGA) GetText() string {
@@ -129,9 +138,9 @@ func (rga *RGA) GetText() string {
 	for _, elem := range rga.Elements {
 		if !elem.Tombstone {
 			result.WriteRune(elem.Character)
-		} else{
+		} else {
 			result.WriteRune(rune(0))
-        }
+		}
 	}
 	return result.String()
 }
@@ -148,9 +157,9 @@ func (rga *RGA) MoveCursorLeft() {
 func (rga *RGA) MoveCursorRight() {
 	for rga.CursorPosition < len(rga.Elements) {
 		rga.CursorPosition++
-        if rga.CursorPosition >= len(rga.Elements) {
-            return
-        }
+		if rga.CursorPosition >= len(rga.Elements) {
+			return
+		}
 		if !rga.Elements[rga.CursorPosition].Tombstone {
 			break
 		}
@@ -158,39 +167,51 @@ func (rga *RGA) MoveCursorRight() {
 }
 
 func (rga *RGA) MoveCursorUp() {
-    if rga.CursorPosition == 0 {
-        return
+	if rga.CursorPosition == 0 {
+		return
 	}
 
 	for rga.CursorPosition > 0 {
-        rga.MoveCursorLeft()
+		rga.MoveCursorLeft()
 		if rga.Elements[rga.CursorPosition].Character == '\n' {
 			break
 		}
 	}
 
 	for rga.CursorPosition > 0 {
-        rga.MoveCursorLeft()
+		rga.MoveCursorLeft()
 		if rga.Elements[rga.CursorPosition].Character == '\n' {
-            rga.MoveCursorRight()
+			rga.MoveCursorRight()
 			break
 		}
 	}
 }
 
-// map cursor
 func (rga *RGA) MoveCursorDown() {
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
-            rga.MoveCursorRight()
+		rga.MoveCursorRight()
 	}
 
 	if rga.CursorPosition < len(rga.Elements) {
-            rga.MoveCursorRight()
+		rga.MoveCursorRight()
 	}
 
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
-            rga.MoveCursorRight()
+		rga.MoveCursorRight()
 	}
+}
+
+// Add this method to update the checksum
+func (rga *RGA) updateChecksum() {
+	data := []byte(rga.GetText())
+	rga.Checksum = crc32.ChecksumIEEE(data)
+}
+
+// Add this method for data integrity check
+func (rga *RGA) VerifyIntegrity() bool {
+	currentChecksum := rga.Checksum
+	rga.updateChecksum()
+	return currentChecksum == rga.Checksum
 }
 
 func init() {

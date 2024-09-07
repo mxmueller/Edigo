@@ -41,6 +41,7 @@ type Editor struct {
 	updateTicker    *time.Ticker
 	nextThemeIndex  int
 	IsSharedSession bool
+	guestCounter    int
 }
 
 func NewEditor(content string, siteID string, theme *theme.Theme) *Editor {
@@ -71,6 +72,7 @@ func NewEditor(content string, siteID string, theme *theme.Theme) *Editor {
 		Update:          make(chan struct{}, 1),
 		nextThemeIndex:  1,
 		IsSharedSession: false,
+		guestCounter:    0,
 	}
 
 	go editor.handleTicker()
@@ -238,8 +240,9 @@ func (e *Editor) updateRemoteCursor(id string, position int) {
 	defer e.remoteCursorMu.Unlock()
 	cursor, exists := e.RemoteCursors[id]
 	if !exists {
+		e.guestCounter++
 		cursor = CursorInfo{
-			Username:   fmt.Sprintf("User-%s", id[:5]),
+			Username:   fmt.Sprintf("guest%d", e.guestCounter),
 			ThemeIndex: e.nextThemeIndex,
 		}
 		e.nextThemeIndex = (e.nextThemeIndex + 1) % len(e.Theme.UserThemes)

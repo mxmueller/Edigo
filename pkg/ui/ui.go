@@ -22,6 +22,7 @@ type UIModel struct {
 	ShowMenu       bool
 	UnsavedChanges bool
 	Theme          *theme.Theme
+	ErrorMsg       string
 }
 
 func NewUIModel(content string, filePath string) *UIModel {
@@ -48,6 +49,7 @@ func NewUIModel(content string, filePath string) *UIModel {
 		ShowMenu:       false,
 		UnsavedChanges: false,
 		Theme:          theme,
+		ErrorMsg:       "",
 	}
 }
 
@@ -91,7 +93,11 @@ func (m *UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case editor.RemoteChange:
-		// Do nothing special, just update the content
+		if !m.Editor.RGA.VerifyIntegrity() {
+			m.ErrorMsg = "Data integrity check failed. Please refresh the session."
+		} else {
+			m.ErrorMsg = ""
+		}
 	}
 
 	m.Viewport.SetContent(m.Editor.RenderContent())
@@ -127,7 +133,7 @@ func (m *UIModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.UnsavedChanges {
 				fmt.Println("Warning: You have unsaved changes!")
 			}
-			m.Editor.Stop() // Stoppen Sie den Ticker, bevor Sie das Programm beenden
+			m.Editor.Stop()
 			return m, tea.Quit
 		case JoinSessionAction:
 			if msg.Data != "Back to Main Menu" && msg.Data != "Back to Editor" && msg.Data != "Quit" {
@@ -173,7 +179,11 @@ func (m *UIModel) View() string {
 	if m.ShowMenu {
 		return m.Theme.RenderMenuTitle("Menu") + "\n" + m.Menu.View()
 	}
-	return m.Viewport.View()
+	content := m.Viewport.View()
+	if m.ErrorMsg != "" {
+		content += "\n" + m.Theme.RenderError(m.ErrorMsg)
+	}
+	return content
 }
 
 func (m *UIModel) saveFile() {

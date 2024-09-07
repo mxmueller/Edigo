@@ -4,13 +4,13 @@ import (
 	"edigo/pkg/ui"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
-
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide the file path as an argument.")
 		os.Exit(1)
@@ -19,16 +19,17 @@ func main() {
 	filePath := os.Args[1]
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
-		fmt.Printf("Error reading file: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error reading file: %v\n", err)
 	}
 
-	model := ui.NewUIModel(string(content), filePath) // Pass file content and path to the model
+	model := ui.NewUIModel(string(content), filePath)
 
-    go model.Editor.Network.ListenForBroadcasts()
+	go func() {
+		model.Editor.Network.ListenForBroadcasts()
+	}()
 
 	p := tea.NewProgram(model)
 	if err := p.Start(); err != nil {
-		panic(err)
+		log.Fatalf("Error starting the program: %v\n", err)
 	}
 }
