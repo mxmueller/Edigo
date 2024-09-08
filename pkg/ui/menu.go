@@ -57,7 +57,7 @@ func NewMenuModel(theme *theme.Theme) MenuModel {
 
 	createItems := []list.Item{
 		MenuItem{title: "Create Public Session", desc: "Create a session without a password"},
-		MenuItem{title: "Create Private Session", desc: "Create a session with a password"},
+		// MenuItem{title: "Create Private Session", desc: "Create a session with a password"},
 		MenuItem{title: "Back to Main Menu", desc: "Return to main menu"},
 		MenuItem{title: "Back to Editor", desc: "Return to the editor"},
 		MenuItem{title: "Quit", desc: "Exit the editor"},
