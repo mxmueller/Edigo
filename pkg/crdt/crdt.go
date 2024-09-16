@@ -144,6 +144,15 @@ func (rga *RGA) GetText() string {
 	}
 	return result.String()
 }
+func (rga *RGA) GetTextWithOutTomestone() string {
+	var result strings.Builder
+	for _, elem := range rga.Elements {
+		if !elem.Tombstone {
+			result.WriteRune(elem.Character)
+		}
+	}
+	return result.String()
+}
 
 func (rga *RGA) MoveCursorLeft() {
 	for rga.CursorPosition > 0 {
