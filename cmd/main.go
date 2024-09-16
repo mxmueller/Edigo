@@ -11,6 +11,7 @@ import (
 )
 
 func main() {
+
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide the file path as an argument.")
 		os.Exit(1)

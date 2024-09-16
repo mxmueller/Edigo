@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"edigo/pkg/crdt"
 	"edigo/pkg/network"
+	"edigo/pkg/highlighter"
 	"edigo/pkg/theme"
 	"encoding/gob"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 )
+
 
 type RemoteChange struct{}
 
@@ -321,7 +323,7 @@ func (e *Editor) GetLineNumbers() string {
 }
 
 func (e *Editor) RenderDocumentWithoutLineNumbers() string {
-	return e.RGA.GetText()
+	return e.RGA.GetTextWithOutTomestone()
 }
 
 func (e *Editor) RenderContent() string {
@@ -330,10 +332,9 @@ func (e *Editor) RenderContent() string {
 
 	var output strings.Builder
 	content := e.RGA.GetText()
+
 	lines := strings.Split(content, "\n")
-
 	lineNumberWidth := len(fmt.Sprintf("%d", len(lines)))
-
 	totalLines := e.Viewport.Height - 2 // Subtracting 2 for header and footer
 
 	for i := 0; i < totalLines; i++ {
@@ -351,6 +352,7 @@ func (e *Editor) RenderContent() string {
 
 		if i < len(lines) {
 			renderedLine := e.renderLineWithCursors(line, i)
+
 			output.WriteString(renderedLineNumber + renderedLine + "\n")
 		} else {
 			output.WriteString(renderedLineNumber + "\n")
@@ -381,6 +383,8 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 	var result strings.Builder
 	lineStartIndex := e.getLineStartIndex(lineIndex)
 
+    sysDef := highlighter.NewSyntaxDefinition()
+
 	for colIndex, ch := range line {
 		absoluteIndex := lineStartIndex + colIndex
 
@@ -399,6 +403,7 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 		result.WriteRune(ch)
 	}
 
+
 	// Check for cursors at the end of the line
 	if lineStartIndex+len(line) == e.LocalCursor.Position {
 		result.WriteString(e.renderCursorWithName(e.LocalCursor))
@@ -412,8 +417,62 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 	}
 	e.remoteCursorMu.RUnlock()
 
+    tokens := sysDef.TokenizeLine(line)
+    colorText := colorText(result.String(), tokens)
+
+	return colorText
+}
+
+func colorText(text string, tokens []highlighter.Token) string {
+	var result strings.Builder
+	remainingText := text
+
+	keywordStyle :=     lipgloss.NewStyle().Foreground(lipgloss.Color("#6C48C5"))    // Blue
+	stringStyle :=      lipgloss.NewStyle().Foreground(lipgloss.Color("#41B3A2"))     // Green
+	numberStyle :=      lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF"))     // Magenta
+	commentStyle :=     lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))    // Gray
+	operatorStyle :=    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF"))   // Red
+	punctuationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF")) // White
+
+	for len(remainingText) > 0 {
+		longestMatch := ""
+        var tokenType highlighter.TokenType
+
+		for _, token := range tokens {
+			if strings.HasPrefix(remainingText, token.Value) {
+                longestMatch = token.Value
+                tokenType = token.Type
+                break
+			}
+		}
+
+		if longestMatch != "" {
+            switch tokenType {
+                case highlighter.TokenKeyword:
+                    result.WriteString(keywordStyle.Render(longestMatch))
+                case highlighter.TokenString:
+                    result.WriteString(stringStyle.Render(longestMatch))
+                case highlighter.TokenNumber:
+                    result.WriteString(numberStyle.Render(longestMatch))
+                case highlighter.TokenComment:
+                    result.WriteString(commentStyle.Render(longestMatch))
+                case highlighter.TokenOperator:
+                    result.WriteString(operatorStyle.Render(longestMatch))
+                case highlighter.TokenPunctuation:
+                    result.WriteString(punctuationStyle.Render(longestMatch))
+                default:
+                    result.WriteString(longestMatch)
+		}
+			remainingText = remainingText[len(longestMatch):]
+		} else {
+			result.WriteByte(remainingText[0])
+			remainingText = remainingText[1:]
+		}
+	}
+
 	return result.String()
 }
+
 func (e *Editor) getLineStartIndex(lineIndex int) int {
 	content := e.RGA.GetText()
 	lines := strings.Split(content, "\n")

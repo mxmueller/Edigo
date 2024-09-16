@@ -98,6 +98,11 @@ func NewTheme() *Theme {
 	}
 }
 
+func (t *Theme) RenderText(text string, color lipgloss.Color) string {
+    var textStyle = lipgloss.NewStyle().Foreground(color)
+    return textStyle.Render(text)
+}
+
 func (t *Theme) RenderLineNumber(number string, width int) string {
 	renderedNumber := t.LineNumberStyle.Render(fmt.Sprintf("%*s", width, number))
 	padding := strings.Repeat(" ", t.LineNumberPadding)
