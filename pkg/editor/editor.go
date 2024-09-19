@@ -383,7 +383,6 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 	var result strings.Builder
 	lineStartIndex := e.getLineStartIndex(lineIndex)
 
-    sysDef := highlighter.NewSyntaxDefinition()
 
 	for colIndex, ch := range line {
 		absoluteIndex := lineStartIndex + colIndex
@@ -417,61 +416,12 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 	}
 	e.remoteCursorMu.RUnlock()
 
-    tokens := sysDef.TokenizeLine(line)
-    colorText := colorText(result.String(), tokens)
+    sysDef := highlighter.NewSyntaxDefinition()
+    colorText := sysDef.ColorText(result.String())
 
 	return colorText
 }
 
-func colorText(text string, tokens []highlighter.Token) string {
-	var result strings.Builder
-	remainingText := text
-
-	keywordStyle :=     lipgloss.NewStyle().Foreground(lipgloss.Color("#6C48C5"))    // Blue
-	stringStyle :=      lipgloss.NewStyle().Foreground(lipgloss.Color("#41B3A2"))     // Green
-	numberStyle :=      lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF"))     // Magenta
-	commentStyle :=     lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))    // Gray
-	operatorStyle :=    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF"))   // Red
-	punctuationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF")) // White
-
-	for len(remainingText) > 0 {
-		longestMatch := ""
-        var tokenType highlighter.TokenType
-
-		for _, token := range tokens {
-			if strings.HasPrefix(remainingText, token.Value) {
-                longestMatch = token.Value
-                tokenType = token.Type
-                break
-			}
-		}
-
-		if longestMatch != "" {
-            switch tokenType {
-                case highlighter.TokenKeyword:
-                    result.WriteString(keywordStyle.Render(longestMatch))
-                case highlighter.TokenString:
-                    result.WriteString(stringStyle.Render(longestMatch))
-                case highlighter.TokenNumber:
-                    result.WriteString(numberStyle.Render(longestMatch))
-                case highlighter.TokenComment:
-                    result.WriteString(commentStyle.Render(longestMatch))
-                case highlighter.TokenOperator:
-                    result.WriteString(operatorStyle.Render(longestMatch))
-                case highlighter.TokenPunctuation:
-                    result.WriteString(punctuationStyle.Render(longestMatch))
-                default:
-                    result.WriteString(longestMatch)
-		}
-			remainingText = remainingText[len(longestMatch):]
-		} else {
-			result.WriteByte(remainingText[0])
-			remainingText = remainingText[1:]
-		}
-	}
-
-	return result.String()
-}
 
 func (e *Editor) getLineStartIndex(lineIndex int) int {
 	content := e.RGA.GetText()
