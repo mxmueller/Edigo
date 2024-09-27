@@ -38,14 +38,9 @@ func (sd *SyntaxDefinition) LineLexer(line string) []Token {
             match := rule.Pattern.FindStringSubmatch(remaining)
             if len(match) > rule.Index{
                 if rule.Pattern.FindIndex([]byte(remaining))[0] != 0 {continue}
-
                 tokens = append(tokens, Token{rule.Color, match[rule.Index]})
-				remaining = remaining[len(match[rule.Index]):]
-                matched = true
-                break
             }
         }
-        if matched{ continue }
 
 		for _, keyword := range sd.Keywords {
 			if strings.HasPrefix(remaining, keyword + " ") {
