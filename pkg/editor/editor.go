@@ -8,13 +8,12 @@ import (
 	"edigo/pkg/theme"
 	"encoding/gob"
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"net"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charmbracelet/bubbles/viewport"
 )
@@ -78,6 +77,7 @@ func NewEditor(content string, filePath string, siteID string, theme *theme.Them
 		nextThemeIndex:  1,
 		IsSharedSession: false,
 		guestCounter:    0,
+		FilePath:        filePath,
 	}
 	return editor
 }
@@ -244,41 +244,6 @@ func (e *Editor) HandleConnections() {
 	}
 }
 
-func (e *Editor) RenderDocument() string {
-	crdt.InsertM.Lock()
-	defer crdt.InsertM.Unlock()
-
-	var result strings.Builder
-	content := e.RGA.GetText()
-
-	for i, ch := range content {
-		if i == e.LocalCursor.Position {
-			result.WriteString(e.renderCursorWithName(e.LocalCursor))
-		}
-		e.remoteCursorMu.RLock()
-		for _, remoteCursor := range e.RemoteCursors {
-			if i == remoteCursor.Position {
-				result.WriteString(e.renderCursorWithName(remoteCursor))
-			}
-		}
-		e.remoteCursorMu.RUnlock()
-		result.WriteRune(ch)
-	}
-
-	if e.LocalCursor.Position == len(content) {
-		result.WriteString(e.renderCursorWithName(e.LocalCursor))
-	}
-	e.remoteCursorMu.RLock()
-	for _, remoteCursor := range e.RemoteCursors {
-		if remoteCursor.Position == len(content) {
-			result.WriteString(e.renderCursorWithName(remoteCursor))
-		}
-	}
-	e.remoteCursorMu.RUnlock()
-
-	return result.String()
-}
-
 func (e *Editor) GetLineNumbers() string {
 	var lineNumbers strings.Builder
 	lineNumber := 1
@@ -292,10 +257,6 @@ func (e *Editor) GetLineNumbers() string {
 	}
 
 	return lineNumbers.String()
-}
-
-func (e *Editor) RenderDocumentWithoutLineNumbers() string {
-	return e.RGA.GetTextWithOutTomestone()
 }
 
 func (e *Editor) RenderContent() string {
@@ -331,14 +292,12 @@ func (e *Editor) RenderContent() string {
 		}
 	}
 
-	headerMsg := ""
+	headerMsg := fmt.Sprintf("File: %s", e.FilePath)
 	if e.Network.IsHost {
-		headerMsg = fmt.Sprintf("File: %s Clients: %d", e.FilePath, len(e.Network.Clients))
-	} else if e.Network.CurrentSession == "" {
-		headerMsg = fmt.Sprintf("File: %s", e.FilePath)
+		headerMsg += fmt.Sprintf(" Clients: %d", len(e.Network.Clients))
 	}
 	if e.Network.Host != nil {
-		headerMsg = fmt.Sprintf("Session: %s", e.Network.CurrentSession)
+		headerMsg += fmt.Sprintf(" Session: %s", e.Network.CurrentSession)
 	}
 
 	header := e.Theme.RenderHeader(headerMsg)
@@ -349,6 +308,10 @@ func (e *Editor) RenderContent() string {
 	content = fmt.Sprintf("%s\n%s%s", header, output.String(), footer)
 
 	return lipgloss.NewStyle().MaxWidth(e.Viewport.Width).MaxHeight(e.Viewport.Height).Render(content)
+}
+
+func (e *Editor) RenderDocumentWithoutLineNumbers() string {
+	return e.RGA.GetTextWithOutTomestone()
 }
 
 func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
