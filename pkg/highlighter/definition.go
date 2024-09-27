@@ -80,9 +80,9 @@ func NewHTMLSyntaxDefinition() *SyntaxDefinition {
 		Punctuation: []string{"<", ">", "/", "\"", "'", "="},
 		Rules: []Rule{
 			{regexp.MustCompile(`<!DOCTYPE[^>]+>`), lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")), 0},
-			{regexp.MustCompile(`<[^>]+>`), lipgloss.NewStyle().Foreground(lipgloss.Color("#6C48C5")), 0},
+			{regexp.MustCompile(`<([^>]+)>`), lipgloss.NewStyle().Foreground(lipgloss.Color("#6C48C5")), 1},
 			{regexp.MustCompile(`"[^"]*"`), lipgloss.NewStyle().Foreground(lipgloss.Color("#41B3A2")), 0},
-			{regexp.MustCompile(`<!--[\s\S]*?-->`), lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")), 0},
+			{regexp.MustCompile(`(<!--[\s\S]*?-->)`), lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")), 1},
 		},
         KeywordStyle :     lipgloss.NewStyle().Foreground(lipgloss.Color("#6C48C5")),
         StringStyle :      lipgloss.NewStyle().Foreground(lipgloss.Color("#41B3A2")),
