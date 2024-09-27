@@ -28,7 +28,7 @@ type UIModel struct {
 func NewUIModel(content string, filePath string) *UIModel {
 	siteID := generateSiteID()
 	theme := theme.NewTheme()
-	editorInstance := editor.NewEditor(content, siteID, theme)
+	editorInstance := editor.NewEditor(content, filePath, siteID, theme)
 	vp := viewport.New(80, 24)
 	editorInstance.Viewport = vp
 	editorInstance.FilePath = filePath

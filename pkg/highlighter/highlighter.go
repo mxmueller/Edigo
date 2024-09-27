@@ -3,65 +3,31 @@ package highlighter
 import (
 	"regexp"
 	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 )
 
-// TokenType repräsentiert verschiedene Arten von Tokens in der Sprache
-type TokenType int
 
-const (
-	TokenKeyword TokenType = iota
-	TokenIdentifier
-	TokenString
-	TokenNumber
-	TokenComment
-	TokenOperator
-	TokenPunctuation
-)
-
-// Token repräsentiert ein einzelnes Token im Code
-type Token struct {
-	Type  TokenType
-	Value string
+func GetSyntaxDefiniton(fileEnd string) *SyntaxDefinition {
+    switch (fileEnd){
+        case ".py": {
+            return NewPythonSyntaxDefinition(); 
+        }
+        case ".js": {
+            return NewJavaScriptSyntaxDefinition(); 
+        }
+        case ".html": {
+            return NewHTMLSyntaxDefinition(); 
+        }
+    }
+    return NewDefaultSyntaxDefinition()
 }
 
-// SyntaxDefinition definiert die Regeln für das Syntax-Highlighting
-type SyntaxDefinition struct {
-	Keywords    []string
-	Operators   []string
-	Punctuation []string
-	Rules       []Rule
-}
-
-// Rule repräsentiert eine einzelne Regel für das Matching von Tokens
-type Rule struct {
-	Pattern *regexp.Regexp
-	Type    TokenType
-    Index   int
-}
-
-// NewSyntaxDefinition erstellt eine neue SyntaxDefinition
-func NewSyntaxDefinition() *SyntaxDefinition {
-	return &SyntaxDefinition{
-		Keywords:    []string{"if", "else", "for", "func", "return", "var", "const"},
-		Operators:   []string{"+", "-", "*", "/", "==", "!=", "<", ">", "<=", ">="},
-		Punctuation: []string{"(", ")", "{", "}", "[", "]", ",", ";", "."},
-		Rules: []Rule{
-			{regexp.MustCompile(`\b[0-9]+(\.[0-9]+)?\b`), TokenNumber, 0},
-			{regexp.MustCompile(`"[^"]*"`), TokenString, 0},
-			{regexp.MustCompile(`//.*$`), TokenComment, 0},
-			{regexp.MustCompile(`func (\w*)\(`), TokenNumber, 1},
-		},
-	}
-}
-
-func (sd *SyntaxDefinition) TokenizeLine(line string) []Token {
+func (sd *SyntaxDefinition) LineLexer(line string) []Token {
 	var tokens []Token
 	remaining := line
 
 	for len(remaining) > 0 {
-        remaining = strings.TrimLeft(remaining, " \t")
+
 		if len(remaining) == 0 {
 			break
 		}
@@ -69,110 +35,124 @@ func (sd *SyntaxDefinition) TokenizeLine(line string) []Token {
 		matched := false
 
         for _, rule := range sd.Rules {
-            match := rule.Pattern.FindStringSubmatch(remaining) 
+            match := rule.Pattern.FindStringSubmatch(remaining)
             if len(match) > rule.Index{
-                tokens = append(tokens, Token{rule.Type, match[rule.Index]})
+                if rule.Pattern.FindIndex([]byte(remaining))[0] != 0 {continue}
+
+                tokens = append(tokens, Token{rule.Color, match[rule.Index]})
+				remaining = remaining[len(match[rule.Index]):]
+                matched = true
                 break
             }
         }
+        if matched{ continue }
 
-		// Prüfe zuerst auf Keywords, Operatoren und Interpunktion
 		for _, keyword := range sd.Keywords {
-			if strings.HasPrefix(remaining, keyword) {
-				tokens = append(tokens, Token{TokenKeyword, keyword})
+			if strings.HasPrefix(remaining, keyword + " ") {
+				tokens = append(tokens, Token{sd.KeywordStyle, keyword})
 				remaining = remaining[len(keyword):]
 				matched = true
 				break
 			}
 		}
+        if matched{ continue }
 
-		if !matched {
-			for _, op := range sd.Operators {
-				if strings.HasPrefix(remaining, op) {
-					tokens = append(tokens, Token{TokenOperator, op})
-					remaining = remaining[len(op):]
-					matched = true
-					break
-				}
-			}
-		}
+        for _, op := range sd.Operators {
+            if strings.HasPrefix(remaining,  op + " ") {
+                tokens = append(tokens, Token{sd.OperatorStyle, op})
+                remaining = remaining[len(op):]
+                matched = true
+                break
+            }
+        }
+        if matched{ continue }
 
-		if !matched {
-			for _, punct := range sd.Punctuation {
-				if strings.HasPrefix(remaining, punct) {
-					tokens = append(tokens, Token{TokenPunctuation, punct})
-					remaining = remaining[len(punct):]
-					matched = true
-					break
-				}
-			}
-		}
+        for _, punct := range sd.Punctuation {
+            if strings.HasPrefix(remaining, punct) {
+                tokens = append(tokens, Token{sd.PunctuationStyle, punct})
+                remaining = remaining[len(punct):]
+                matched = true
+                break
+            }
+        }
+        if matched{ continue }
 
-		if !matched {
-			tokens = append(tokens, Token{TokenIdentifier, string(remaining[0])})
-			remaining = remaining[1:]
-		}
+        remaining = remaining[1:]
 	}
 	return tokens
 }
 
-func stripColorCodes(text string) string {
-    // Compile the regular expression for ANSI escape codes
-    re := regexp.MustCompile(`\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
-    
-    // Replace all occurrences of ANSI escape codes with an empty string
-    return re.ReplaceAllString(text, "")
-}
-
-func (sd *SyntaxDefinition) ColorText(text string) string {
+// input is the text without cursior and outout the text used to emite
+func (sd *SyntaxDefinition) EmiteColorText(input string, output string) string {
 	var result strings.Builder
 
-    cleanText := stripColorCodes(text)
-    tokens := sd.TokenizeLine(cleanText)
-	remainingText := text
-
-	keywordStyle :=     lipgloss.NewStyle().Foreground(lipgloss.Color("#6C48C5"))
-	stringStyle :=      lipgloss.NewStyle().Foreground(lipgloss.Color("#41B3A2"))
-	numberStyle :=      lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF"))
-	commentStyle :=     lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))
-	operatorStyle :=    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF"))
-	punctuationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF"))
+    tokens := sd.LineLexer(input)
+	remainingText := output
 
 	for len(remainingText) > 0 {
+        var color lipgloss.Style
 		longestMatch := ""
-        var tokenType TokenType
 
 		for _, token := range tokens {
-			if strings.HasPrefix(remainingText, token.Value) {
-                longestMatch = token.Value
-                tokenType = token.Type
+            output_text, isToken :=  sd.findToken(remainingText, token)
+            if (isToken){
+                longestMatch = output_text
+                color = token.Color
                 break
 			}
 		}
 
-		if longestMatch != "" {
-            switch tokenType {
-                case TokenKeyword:
-                    result.WriteString(keywordStyle.Render(longestMatch))
-                case TokenString:
-                    result.WriteString(stringStyle.Render(longestMatch))
-                case TokenNumber:
-                    result.WriteString(numberStyle.Render(longestMatch))
-                case TokenComment:
-                    result.WriteString(commentStyle.Render(longestMatch))
-                case TokenOperator:
-                    result.WriteString(operatorStyle.Render(longestMatch))
-                case TokenPunctuation:
-                    result.WriteString(punctuationStyle.Render(longestMatch))
-                default:
-                    result.WriteString(longestMatch)
-		}
-			remainingText = remainingText[len(longestMatch):]
-		} else {
+
+		if longestMatch == "" {
 			result.WriteByte(remainingText[0])
 			remainingText = remainingText[1:]
-		}
+            continue
+        }
+        result.WriteString(sd.colorizeText(longestMatch, color))
+        remainingText = remainingText[len(longestMatch):]
 	}
 
 	return result.String()
 }
+
+func (sd *SyntaxDefinition) findToken(text string, token Token) (string, bool){
+	cursorPattern := `█`
+
+	re := regexp.MustCompile(cursorPattern)
+	cleanedText := re.ReplaceAllString(text, "")
+
+	if !strings.HasPrefix(cleanedText, token.Value) {
+        return "", false
+    }
+
+    cursorPos := strings.Index(text, "█")
+    if cursorPos == -1 {
+        return token.Value, true
+    }
+    if (cursorPos >= len(token.Value)){
+        return token.Value, true
+    } 
+
+    tokenWithCursor := token.Value[:cursorPos] + "█" + token.Value[cursorPos:]
+    return tokenWithCursor, true
+}
+
+func (sd *SyntaxDefinition) colorizeText(text string, style lipgloss.Style) string {
+	cursorPattern := `█`
+
+	re := regexp.MustCompile(cursorPattern)
+
+	parts := re.Split(text, -1)
+
+	coloredText := ""
+	for i, part := range parts {
+		coloredText += style.Render(part)
+
+		if i < len(parts)-1 {
+			coloredText += "█"
+		}
+	}
+
+	return coloredText
+}
+

@@ -110,11 +110,7 @@ func (t *Theme) RenderLineNumber(number string, width int) string {
 }
 
 func (t *Theme) RenderCursor(isSharedSession bool, themeIndex int) string {
-	if !isSharedSession {
-		return t.CursorStyle.Render("█")
-	}
-	userTheme := t.UserThemes[themeIndex%len(t.UserThemes)]
-	return lipgloss.NewStyle().Foreground(userTheme.MainColor).Render("█")
+    return "█"
 }
 
 func (t *Theme) RenderHeader(content string) string {

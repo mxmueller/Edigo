@@ -139,11 +139,11 @@ func (rga *RGA) GetText() string {
 		if !elem.Tombstone {
 			result.WriteRune(elem.Character)
 		} else {
-			result.WriteRune(rune(0))
 		}
 	}
 	return result.String()
 }
+
 func (rga *RGA) GetTextWithOutTomestone() string {
 	var result strings.Builder
 	for _, elem := range rga.Elements {
@@ -208,6 +208,18 @@ func (rga *RGA) MoveCursorDown() {
 	for rga.CursorPosition < len(rga.Elements) && rga.Elements[rga.CursorPosition].Character != '\n' {
 		rga.MoveCursorRight()
 	}
+}
+
+func (rga *RGA) ConvertCursior(index int) int {
+    var count int = 0
+    i := 0
+    for i < index{
+        if rga.Elements[i].Tombstone { 
+            count++ 
+        }
+        i++
+    }
+    return index - count
 }
 
 // Add this method to update the checksum

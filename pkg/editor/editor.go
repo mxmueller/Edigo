@@ -3,16 +3,18 @@ package editor
 import (
 	"bytes"
 	"edigo/pkg/crdt"
-	"edigo/pkg/network"
 	"edigo/pkg/highlighter"
+	"edigo/pkg/network"
 	"edigo/pkg/theme"
 	"encoding/gob"
 	"fmt"
-	"github.com/charmbracelet/lipgloss"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/charmbracelet/bubbles/viewport"
 )
@@ -37,6 +39,7 @@ type Editor struct {
 	NewConnection   chan net.Conn
 	Error           string
 	Theme           *theme.Theme
+    SyntaxDef       highlighter.SyntaxDefinition
 	LocalCursor     CursorInfo
 	RemoteCursors   map[string]CursorInfo
 	remoteCursorMu  sync.RWMutex
@@ -46,7 +49,7 @@ type Editor struct {
 	guestCounter    int
 }
 
-func NewEditor(content string, siteID string, theme *theme.Theme) *Editor {
+func NewEditor(content string, filePath string, siteID string, theme *theme.Theme) *Editor {
 	rga := crdt.NewRGA(siteID)
 	for _, char := range content {
 		rga.LocalInsert(char)
@@ -56,11 +59,14 @@ func NewEditor(content string, siteID string, theme *theme.Theme) *Editor {
 	network := network.NewNetwork()
 	network.NewConnection = newConnection
 
+    fileType := filepath.Ext(filePath)
+
 	editor := &Editor{
 		RGA:           rga,
 		Network:       network,
 		NewConnection: newConnection,
 		Theme:         theme,
+        SyntaxDef:     *highlighter.GetSyntaxDefiniton(fileType),
 		Viewport:      viewport.New(80, 24),
 		LocalCursor: CursorInfo{
 			Position:   0,
@@ -382,18 +388,20 @@ func (e *Editor) RenderContent() string {
 func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 	var result strings.Builder
 	lineStartIndex := e.getLineStartIndex(lineIndex)
-
+    
+    c_cursior := e.RGA.ConvertCursior(e.LocalCursor.Position)
 
 	for colIndex, ch := range line {
 		absoluteIndex := lineStartIndex + colIndex
 
-		if absoluteIndex == e.LocalCursor.Position {
+		if absoluteIndex == c_cursior {
 			result.WriteString(e.renderCursorWithName(e.LocalCursor))
 		}
 
 		e.remoteCursorMu.RLock()
 		for _, remoteCursor := range e.RemoteCursors {
-			if absoluteIndex == remoteCursor.Position {
+            c_remoteCursior := e.RGA.ConvertCursior(remoteCursor.Position)
+			if absoluteIndex == c_remoteCursior {
 				result.WriteString(e.renderCursorWithName(remoteCursor))
 			}
 		}
@@ -404,24 +412,23 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 
 
 	// Check for cursors at the end of the line
-	if lineStartIndex+len(line) == e.LocalCursor.Position {
+	if lineStartIndex+len(line) == c_cursior {
 		result.WriteString(e.renderCursorWithName(e.LocalCursor))
 	}
 
 	e.remoteCursorMu.RLock()
 	for _, remoteCursor := range e.RemoteCursors {
-		if lineStartIndex+len(line) == remoteCursor.Position {
+        c_remoteCursior := e.RGA.ConvertCursior(remoteCursor.Position)
+		if lineStartIndex+len(line) == c_remoteCursior {
 			result.WriteString(e.renderCursorWithName(remoteCursor))
 		}
 	}
 	e.remoteCursorMu.RUnlock()
 
-    sysDef := highlighter.NewSyntaxDefinition()
-    colorText := sysDef.ColorText(result.String())
+    colorText := e.SyntaxDef.EmiteColorText(line, result.String())
 
 	return colorText
 }
-
 
 func (e *Editor) getLineStartIndex(lineIndex int) int {
 	content := e.RGA.GetText()
