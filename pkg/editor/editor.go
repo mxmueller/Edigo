@@ -8,24 +8,21 @@ import (
 	"edigo/pkg/theme"
 	"encoding/gob"
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"net"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/charmbracelet/bubbles/viewport"
 )
-
 
 type RemoteChange struct{}
 
 type CursorInfo struct {
 	Position   int
 	LastMove   time.Time
-	ShowName   bool
 	Username   string
 	ThemeIndex int
 }
@@ -39,7 +36,7 @@ type Editor struct {
 	NewConnection   chan net.Conn
 	Error           string
 	Theme           *theme.Theme
-    SyntaxDef       highlighter.SyntaxDefinition
+	SyntaxDef       highlighter.SyntaxDefinition
 	LocalCursor     CursorInfo
 	RemoteCursors   map[string]CursorInfo
 	remoteCursorMu  sync.RWMutex
@@ -59,19 +56,18 @@ func NewEditor(content string, filePath string, siteID string, theme *theme.Them
 	network := network.NewNetwork()
 	network.NewConnection = newConnection
 
-    fileType := filepath.Ext(filePath)
+	fileType := filepath.Ext(filePath)
 
 	editor := &Editor{
 		RGA:           rga,
 		Network:       network,
 		NewConnection: newConnection,
 		Theme:         theme,
-        SyntaxDef:     *highlighter.GetSyntaxDefiniton(fileType),
+		SyntaxDef:     *highlighter.GetSyntaxDefiniton(fileType),
 		Viewport:      viewport.New(80, 24),
 		LocalCursor: CursorInfo{
 			Position:   0,
 			LastMove:   time.Now(),
-			ShowName:   false,
 			Username:   "You",
 			ThemeIndex: 0,
 		},
@@ -81,33 +77,9 @@ func NewEditor(content string, filePath string, siteID string, theme *theme.Them
 		nextThemeIndex:  1,
 		IsSharedSession: false,
 		guestCounter:    0,
+		FilePath:        filePath,
 	}
-
-	go editor.handleTicker()
-
 	return editor
-}
-
-func (e *Editor) handleTicker() {
-	for range e.updateTicker.C {
-		updated := false
-		if !e.LocalCursor.ShowName && time.Since(e.LocalCursor.LastMove) > 1500*time.Millisecond {
-			e.LocalCursor.ShowName = true
-			updated = true
-		}
-		e.remoteCursorMu.Lock()
-		for id, cursor := range e.RemoteCursors {
-			if !cursor.ShowName && time.Since(cursor.LastMove) > 1500*time.Millisecond {
-				cursor.ShowName = true
-				e.RemoteCursors[id] = cursor
-				updated = true
-			}
-		}
-		e.remoteCursorMu.Unlock()
-		if updated {
-			e.Update <- struct{}{}
-		}
-	}
 }
 
 func (e *Editor) Stop() {
@@ -149,7 +121,6 @@ func (e *Editor) MoveCursorDown() {
 func (e *Editor) updateLocalCursor() {
 	e.LocalCursor.Position = e.RGA.CursorPosition
 	e.LocalCursor.LastMove = time.Now()
-	e.LocalCursor.ShowName = false
 	e.SendCursorUpdate()
 }
 
@@ -257,16 +228,11 @@ func (e *Editor) updateRemoteCursor(id string, position int) {
 	}
 	cursor.Position = position
 	cursor.LastMove = time.Now()
-	cursor.ShowName = false
 	e.RemoteCursors[id] = cursor
 }
 
 func (e *Editor) renderCursorWithName(cursor CursorInfo) string {
-	cursorRender := e.Theme.RenderCursor(e.IsSharedSession, cursor.ThemeIndex)
-	if e.IsSharedSession && cursor.ShowName {
-		return cursorRender + e.Theme.RenderUsername(cursor.Username, cursor.ThemeIndex)
-	}
-	return cursorRender
+	return e.Theme.RenderCursor(e.IsSharedSession, cursor.ThemeIndex)
 }
 
 func (e *Editor) HandleConnections() {
@@ -276,41 +242,6 @@ func (e *Editor) HandleConnections() {
 		e.Update <- struct{}{}
 		go e.reciveInput(newConn)
 	}
-}
-
-func (e *Editor) RenderDocument() string {
-	crdt.InsertM.Lock()
-	defer crdt.InsertM.Unlock()
-
-	var result strings.Builder
-	content := e.RGA.GetText()
-
-	for i, ch := range content {
-		if i == e.LocalCursor.Position {
-			result.WriteString(e.renderCursorWithName(e.LocalCursor))
-		}
-		e.remoteCursorMu.RLock()
-		for _, remoteCursor := range e.RemoteCursors {
-			if i == remoteCursor.Position {
-				result.WriteString(e.renderCursorWithName(remoteCursor))
-			}
-		}
-		e.remoteCursorMu.RUnlock()
-		result.WriteRune(ch)
-	}
-
-	if e.LocalCursor.Position == len(content) {
-		result.WriteString(e.renderCursorWithName(e.LocalCursor))
-	}
-	e.remoteCursorMu.RLock()
-	for _, remoteCursor := range e.RemoteCursors {
-		if remoteCursor.Position == len(content) {
-			result.WriteString(e.renderCursorWithName(remoteCursor))
-		}
-	}
-	e.remoteCursorMu.RUnlock()
-
-	return result.String()
 }
 
 func (e *Editor) GetLineNumbers() string {
@@ -326,10 +257,6 @@ func (e *Editor) GetLineNumbers() string {
 	}
 
 	return lineNumbers.String()
-}
-
-func (e *Editor) RenderDocumentWithoutLineNumbers() string {
-	return e.RGA.GetTextWithOutTomestone()
 }
 
 func (e *Editor) RenderContent() string {
@@ -365,14 +292,12 @@ func (e *Editor) RenderContent() string {
 		}
 	}
 
-	headerMsg := ""
+	headerMsg := fmt.Sprintf("File: %s", e.FilePath)
 	if e.Network.IsHost {
-		headerMsg = fmt.Sprintf("File: %s Clients: %d", e.FilePath, len(e.Network.Clients))
-	} else if e.Network.CurrentSession == "" {
-		headerMsg = fmt.Sprintf("File: %s", e.FilePath)
+		headerMsg += fmt.Sprintf(" Clients: %d", len(e.Network.Clients))
 	}
 	if e.Network.Host != nil {
-		headerMsg = fmt.Sprintf("Session: %s", e.Network.CurrentSession)
+		headerMsg += fmt.Sprintf(" Session: %s", e.Network.CurrentSession)
 	}
 
 	header := e.Theme.RenderHeader(headerMsg)
@@ -385,11 +310,15 @@ func (e *Editor) RenderContent() string {
 	return lipgloss.NewStyle().MaxWidth(e.Viewport.Width).MaxHeight(e.Viewport.Height).Render(content)
 }
 
+func (e *Editor) RenderDocumentWithoutLineNumbers() string {
+	return e.RGA.GetTextWithOutTomestone()
+}
+
 func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 	var result strings.Builder
 	lineStartIndex := e.getLineStartIndex(lineIndex)
-    
-    c_cursior := e.RGA.ConvertCursior(e.LocalCursor.Position)
+
+	c_cursior := e.RGA.ConvertCursior(e.LocalCursor.Position)
 
 	for colIndex, ch := range line {
 		absoluteIndex := lineStartIndex + colIndex
@@ -400,7 +329,7 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 
 		e.remoteCursorMu.RLock()
 		for _, remoteCursor := range e.RemoteCursors {
-            c_remoteCursior := e.RGA.ConvertCursior(remoteCursor.Position)
+			c_remoteCursior := e.RGA.ConvertCursior(remoteCursor.Position)
 			if absoluteIndex == c_remoteCursior {
 				result.WriteString(e.renderCursorWithName(remoteCursor))
 			}
@@ -410,7 +339,6 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 		result.WriteRune(ch)
 	}
 
-
 	// Check for cursors at the end of the line
 	if lineStartIndex+len(line) == c_cursior {
 		result.WriteString(e.renderCursorWithName(e.LocalCursor))
@@ -418,14 +346,14 @@ func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
 
 	e.remoteCursorMu.RLock()
 	for _, remoteCursor := range e.RemoteCursors {
-        c_remoteCursior := e.RGA.ConvertCursior(remoteCursor.Position)
+		c_remoteCursior := e.RGA.ConvertCursior(remoteCursor.Position)
 		if lineStartIndex+len(line) == c_remoteCursior {
 			result.WriteString(e.renderCursorWithName(remoteCursor))
 		}
 	}
 	e.remoteCursorMu.RUnlock()
 
-    colorText := e.SyntaxDef.EmiteColorText(line, result.String())
+	colorText := e.SyntaxDef.EmiteColorText(line, result.String())
 
 	return colorText
 }

@@ -33,12 +33,14 @@ type Network struct {
 	NewConnection  chan net.Conn
 	CurrentSession string // "" -> keine Session offen
 	UdpPort        int
+	HostFilePath   string // New field to store the host's file path
 }
 
 type Session struct {
-	Name string
-	IP   string
-	Port int
+	Name     string
+	IP       string
+	Port     int
+	FilePath string // New field to store the file path
 }
 
 var (
@@ -121,7 +123,7 @@ func (network *Network) ListenForBroadcasts() {
 		message := string(buffer[:n])
 		parts := strings.Split(message, "|")
 
-		if len(parts) != 4 {
+		if len(parts) != 5 {
 			fmt.Printf("Ungültiges Nachrichtenformat empfangen: %s\n", message)
 			continue
 		}
@@ -143,8 +145,9 @@ func (network *Network) ListenForBroadcasts() {
 				fmt.Printf("Fehler beim Konvertieren des Ports: %v\n", err)
 				continue
 			}
+			filePath := parts[4]
 			sessionMutex.Lock()
-			network.Sessions[sessionName] = Session{Name: sessionName, IP: remoteAddr.IP.String(), Port: port}
+			network.Sessions[sessionName] = Session{Name: sessionName, IP: remoteAddr.IP.String(), Port: port, FilePath: filePath}
 			sessionMutex.Unlock()
 		}
 	}
@@ -168,7 +171,7 @@ func (network *Network) BroadcastSession(rga *crdt.RGA) {
 				return
 			default:
 				for udpPort := broadcastMin; udpPort <= broadcastMax; udpPort++ {
-					message := []byte(fmt.Sprintf("SESSION|%s|%d|%d", sessionName, port, network.UdpPort))
+					message := []byte(fmt.Sprintf("SESSION|%s|%d|%d|%s", sessionName, port, network.UdpPort, network.HostFilePath))
 					addr, err := net.ResolveUDPAddr("udp", broadcastAddr+":"+strconv.Itoa(udpPort))
 					if err != nil {
 						fmt.Printf("Fehler beim Auflösen der Broadcast-Adresse für Port %d: %v\n", udpPort, err)
@@ -256,6 +259,7 @@ func (network *Network) JoinSession(sessionName string) crdt.RGA {
 	network.NewConnection <- conn
 	network.IsHost = false
 	network.CurrentSession = session.Name
+	network.HostFilePath = session.FilePath
 
 	// Verify the integrity of the received RGA
 	if !tmpstruct.VerifyIntegrity() {
