@@ -32,6 +32,7 @@ type Editor struct {
 	Viewport        viewport.Model
 	Network         *network.Network
 	FilePath        string
+	FileExt         string
 	Update          chan struct{}
 	NewConnection   chan net.Conn
 	Error           string
@@ -56,14 +57,14 @@ func NewEditor(content string, filePath string, siteID string, theme *theme.Them
 	network := network.NewNetwork()
 	network.NewConnection = newConnection
 
-	fileType := filepath.Ext(filePath)
+	fileExt := filepath.Ext(filePath)
 
 	editor := &Editor{
 		RGA:           rga,
 		Network:       network,
 		NewConnection: newConnection,
 		Theme:         theme,
-		SyntaxDef:     *highlighter.GetSyntaxDefiniton(fileType),
+		SyntaxDef:     *highlighter.GetSyntaxDefiniton(fileExt),
 		Viewport:      viewport.New(80, 24),
 		LocalCursor: CursorInfo{
 			Position:   0,
@@ -78,7 +79,12 @@ func NewEditor(content string, filePath string, siteID string, theme *theme.Them
 		IsSharedSession: false,
 		guestCounter:    0,
 		FilePath:        filePath,
+		FileExt:         fileExt,
 	}
+
+	network.HostFilePath = filePath
+	network.HostFileExt = fileExt
+
 	return editor
 }
 
@@ -241,7 +247,47 @@ func (e *Editor) HandleConnections() {
 		e.IsSharedSession = true
 		e.Update <- struct{}{}
 		go e.reciveInput(newConn)
+
+		// Update SyntaxDef for clients when joining a session
+		if !e.Network.IsHost {
+			e.SyntaxDef = *highlighter.GetSyntaxDefiniton(e.Network.HostFileExt)
+		}
 	}
+}
+
+func (e *Editor) RenderDocument() string {
+	crdt.InsertM.Lock()
+	defer crdt.InsertM.Unlock()
+
+	var result strings.Builder
+	content := e.RGA.GetText()
+
+	for i, ch := range content {
+		if i == e.LocalCursor.Position {
+			result.WriteString(e.renderCursorWithName(e.LocalCursor))
+		}
+		e.remoteCursorMu.RLock()
+		for _, remoteCursor := range e.RemoteCursors {
+			if i == remoteCursor.Position {
+				result.WriteString(e.renderCursorWithName(remoteCursor))
+			}
+		}
+		e.remoteCursorMu.RUnlock()
+		result.WriteRune(ch)
+	}
+
+	if e.LocalCursor.Position == len(content) {
+		result.WriteString(e.renderCursorWithName(e.LocalCursor))
+	}
+	e.remoteCursorMu.RLock()
+	for _, remoteCursor := range e.RemoteCursors {
+		if remoteCursor.Position == len(content) {
+			result.WriteString(e.renderCursorWithName(remoteCursor))
+		}
+	}
+	e.remoteCursorMu.RUnlock()
+
+	return result.String()
 }
 
 func (e *Editor) GetLineNumbers() string {
@@ -257,6 +303,10 @@ func (e *Editor) GetLineNumbers() string {
 	}
 
 	return lineNumbers.String()
+}
+
+func (e *Editor) RenderDocumentWithoutLineNumbers() string {
+	return e.RGA.GetTextWithOutTomestone()
 }
 
 func (e *Editor) RenderContent() string {
@@ -308,10 +358,6 @@ func (e *Editor) RenderContent() string {
 	content = fmt.Sprintf("%s\n%s%s", header, output.String(), footer)
 
 	return lipgloss.NewStyle().MaxWidth(e.Viewport.Width).MaxHeight(e.Viewport.Height).Render(content)
-}
-
-func (e *Editor) RenderDocumentWithoutLineNumbers() string {
-	return e.RGA.GetTextWithOutTomestone()
 }
 
 func (e *Editor) renderLineWithCursors(line string, lineIndex int) string {
