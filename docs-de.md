@@ -55,6 +55,15 @@ func (rga *RGA) LocalInsert(char rune) Operation {
     return Operation{Type: Insert, ID: id, Character: char, Position: rga.CursorPosition}
 }
 ```
+Allerdings möchten wir transparent darüber informieren, dass die Einfügeoperation noch nicht vollständig den idealen CRDT-Prinzipien entspricht.
+Die aktuelle Implementierung bietet bereits eine solide Grundlage für kollaboratives Editieren und bewältigt viele Szenarien erfolgreich. Dennoch sind wir uns bewusst, dass in bestimmten komplexen Situationen noch Verbesserungspotenzial besteht.
+
+Um die CRDT-Implementierung zu vervollständigen, sind folgende Schritte erforderlich:
+
+1. Verfeinerte Timestamp-Generierung: Implementierung eines präziseren Mechanismus zur Erzeugung eindeutiger Zeitstempel, der die kausale Beziehung zwischen Operationen besser abbildet.
+2. Erweiterte Konflikterkennung: Entwicklung fortschrittlicherer Algorithmen zur Erkennung und Auflösung von Konflikten bei gleichzeitigen Einfügeoperationen an derselben Position.
+3. Optimierte Datenstruktur: Überarbeitung der zugrundeliegenden Datenstruktur, um eine effizientere Verwaltung und Zusammenführung von Einfügeoperationen zu ermöglichen.
+4. Verbesserte Netzwerksynchronisation: Implementierung eines robusteren Protokolls für die Übertragung und Synchronisation von CRDT-Operationen zwischen den Clients.
 
 #### 2.2.2 Löschen
 
@@ -252,3 +261,194 @@ func (rga *RGA) MoveCursorRight() {
 3. Erweiterung des CRDT-Modells zur Unterstützung von strukturierten Daten (z.B. für Rich-Text-Formatierung)
 4. Implementierung von Kompressionsalgorithmen für die Netzwerkübertragung zur Reduzierung der Bandbreitennutzung
 5. Entwicklung eines Plugin-Systems zur einfachen Erweiterung der Editor-Funktionalität
+
+[Vorherige Inhalte bleiben unverändert]
+
+## 7. Systembedienung und Anwendungsfälle
+
+Dieses Kapitel erläutert die praktische Nutzung des kollaborativen Texteditors und beschreibt typische Anwendungsfälle.
+
+### 7.1 Systemstart und Konfiguration
+
+#### 7.1.1 Kompilierung und Ausführung
+
+```bash
+go build -o editor
+./editor <Dateipfad>
+```
+
+#### 7.1.2 Konfigurationsparameter
+
+Der Editor akzeptiert folgende Kommandozeilenargumente:
+
+- `-port=<Portnummer>`: Spezifiziert den zu verwendenden Netzwerkport (Standard: 12346)
+- `-theme=<Themenname>`: Wählt ein vordefiniertes Farbschema (Standard: "default")
+
+Beispiel:
+```bash
+./editor -port=12350 -theme=dark mydocument.txt
+```
+
+### 7.2 Benutzeroberfläche und Navigation
+
+Die Benutzeroberfläche ist in drei Hauptbereiche unterteilt:
+
+1. Headerbereich: Zeigt Dateinamen und Verbindungsstatus
+2. Editorbereich: Hauptbereich für die Textbearbeitung
+3. Footerbereich: Zeigt Statusinformationen und Fehlermeldungen
+
+Navigation erfolgt primär über die Pfeiltasten:
+
+- ↑/↓: Bewegt den Cursor vertikal
+- ←/→: Bewegt den Cursor horizontal
+- Strg+←/→: Bewegt den Cursor wortweise
+
+### 7.3 Kollaborative Funktionen
+
+#### 7.3.1 Sitzungserstellung
+
+```go
+func (network *Network) BroadcastSession(rga *crdt.RGA) {
+    // ...
+    go func() {
+        for {
+            // Broadcast session information
+            message := []byte(fmt.Sprintf("SESSION|%s|%d|%d|%s|%s", sessionName, port, network.UdpPort, network.HostFilePath, network.HostFileExt))
+            // Send broadcast...
+        }
+    }()
+    // ...
+}
+```
+
+Um eine neue Sitzung zu erstellen:
+1. Öffnen Sie das Menü mit `Esc`
+2. Wählen Sie "Create Session" → "Create Public Session"
+
+#### 7.3.2 Sitzungsbeitritt
+
+```go
+func (network *Network) JoinSession(sessionName string) crdt.RGA {
+    // ...
+    conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", session.IP, session.Port))
+    // ...
+    // Receive and apply initial RGA state
+    // ...
+    return *tmpstruct
+}
+```
+
+Um einer Sitzung beizutreten:
+1. Öffnen Sie das Menü mit `Esc`
+2. Wählen Sie "Join Session"
+3. Wählen Sie die gewünschte Sitzung aus der Liste
+
+### 7.4 Textbearbeitung und CRDT-Operationen
+
+#### 7.4.1 Texteinfügung
+
+```go
+func (ih *InputHandler) HandleKeyMsg(msg tea.KeyMsg) {
+    // ...
+    case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+        ih.Editor.InsertCharacter('\n')
+    default:
+        if len(msg.String()) == 1 { // Only handle single characters
+            ih.Editor.InsertCharacter(rune(msg.String()[0]))
+        }
+    // ...
+}
+```
+
+Texteinfügung erfolgt durch direkte Tastatureingabe. Jede Einfügung erzeugt eine CRDT-Operation, die lokal angewendet und an verbundene Clients gesendet wird.
+
+#### 7.4.2 Textlöschung
+
+```go
+func (ih *InputHandler) HandleKeyMsg(msg tea.KeyMsg) {
+    // ...
+    case key.Matches(msg, key.NewBinding(key.WithKeys("backspace", "ctrl+h"))):
+        ih.Editor.DeleteCharacterBeforeCursor()
+    // ...
+}
+```
+
+Löschungen werden durch die Rücktaste ausgelöst und erzeugen ebenfalls CRDT-Operationen.
+
+### 7.5 Dateioperationen
+
+#### 7.5.1 Speichern
+
+```go
+func (m *UIModel) saveFile() {
+    // ...
+    content := m.Editor.RenderDocumentWithoutLineNumbers()
+    err := os.WriteFile(m.Editor.FilePath, []byte(content), 0644)
+    // ...
+}
+```
+
+Zum Speichern:
+1. Drücken Sie `Strg+S`, oder
+2. Öffnen Sie das Menü mit `Esc` und wählen Sie "Save"
+
+#### 7.5.2 Laden
+
+Das Laden einer Datei erfolgt beim Programmstart durch Angabe des Dateipfads als Kommandozeilenargument.
+
+### 7.6 Fortgeschrittene Funktionen
+
+#### 7.6.1 Syntax-Highlighting
+
+Das Syntax-Highlighting wird automatisch basierend auf der Dateierweiterung aktiviert:
+
+```go
+func GetSyntaxDefiniton(fileEnd string) *SyntaxDefinition {
+    switch (fileEnd) {
+    case ".py":
+        return NewPythonSyntaxDefinition()
+    case ".js":
+        return NewJavaScriptSyntaxDefinition()
+    case ".html":
+        return NewHTMLSyntaxDefinition()
+    }
+    return NewDefaultSyntaxDefinition()
+}
+```
+
+#### 7.6.2 Theming
+
+Themes können über das Kommandozeilenargument `-theme` ausgewählt werden. Die Theming-Engine ermöglicht die Anpassung aller UI-Elemente:
+
+```go
+type Theme struct {
+    BaseStyle             lipgloss.Style
+    HeaderStyle           lipgloss.Style
+    FooterStyle           lipgloss.Style
+    LineNumberStyle       lipgloss.Style
+    CursorStyle           lipgloss.Style
+    // ...
+}
+```
+
+### 7.7 Fehlerbehebung und Debugging
+
+#### 7.7.1 Verbindungsprobleme
+
+Bei Verbindungsproblemen:
+1. Überprüfen Sie die Netzwerkeinstellungen
+2. Stellen Sie sicher, dass der spezifizierte Port verfügbar ist
+3. Versuchen Sie, der Sitzung erneut beizutreten
+
+#### 7.7.2 Konsistenzprüfung
+
+Der Editor führt regelmäßige Konsistenzprüfungen durch:
+
+```go
+func (rga *RGA) VerifyIntegrity() bool {
+    currentChecksum := rga.Checksum
+    rga.updateChecksum()
+    return currentChecksum == rga.Checksum
+}
+```
+Bei Inkonsistenzen wird eine Warnmeldung angezeigt, und es wird empfohlen, die Sitzung neu zu verbinden.
