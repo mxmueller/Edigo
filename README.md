@@ -38,7 +38,3 @@ To contribute to the project:
 3. Make your changes
 4. Run tests: `go test ./...`
 5. Submit a pull request
-
-## License
-
-[Insert your chosen license here]
