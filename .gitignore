@@ -11,6 +11,8 @@
 # Dependency directories (remove the comment below if you're using vendoring)
 /vendor/
 
+# nix build directory
+result
 
 # IDE and editor specific files
 .vscode/

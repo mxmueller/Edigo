@@ -36,7 +36,7 @@
             inherit version;
             src = ./.;
 
-            vendorHash = "sha256-zW3xHqQ/gwiIcByc++m7LA4m9GjuJ2BQgMgl0fqBMg4=";
+            vendorHash = "sha256-R4bd7HPy/DeGO0veo4nxJGvrUcxnujafkA1CaSSEdEw=";
           };
         });
 
